@@ -22,7 +22,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await response.json();
 
       if (data.audioUrl) {
-        // Play the audio if a URL is returned
         const audio = new Audio(data.audioUrl);
         audio.play();
       } else {

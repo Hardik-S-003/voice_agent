@@ -1,39 +1,84 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Agent</title>
-        <style>
-        #speakButton {
-            background-color: #4CAF50; 
-            border: none;
-            color: white;
-            padding: 10px 30px;
-            text-align: center;
-            display: inline-block;
-            font-size: 16px;
-            margin: 4px 2px;
-            cursor: pointer;
-            border-radius: 6px; 
-            transition: background-color 0.3s ease; 
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice Agent</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
 
-        #speakButton {
-            background-color: #45a049; 
-        }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: radial-gradient(circle at top left, #1c1f26, #0e1014);
+      color: #f1f1f1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
 
-        #speakButton {
-            background-color: #3e8e41; 
-        }
-    </style>
+    h1 {
+      font-size: 2.5rem;
+      color: #9f02fa;
+      text-shadow: 0 0 5px #ac08ec, 0 0 10px rgb(134, 10, 236);
+      margin-bottom: 30px;
+    }
+
+    textarea {
+      width: 90%;
+      max-width: 600px;
+      height: 150px;
+      font-size: 16px;
+      padding: 15px;
+      background-color: #2a2e38;
+      color: #f1f1f1;
+      border: 1px solid #555;
+      border-radius: 12px;
+      outline: none;
+      resize: none;
+      box-shadow: 0 0 10px rgba(0, 255, 213, 0.1);
+      transition: border 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    textarea:focus {
+      border: 1px solid #d30be6;
+      box-shadow: 0 0 12px rgba(0, 255, 213, 0.3);
+    }
+
+    button {
+      margin-top: 20px;
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: 500;
+      color: #0e1014;
+      background-color: #8b09e2;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color 0.3s ease, transform 0.2s ease;
+    }
+
+    button:hover {
+      background-color: rgb(150, 14, 241);
+      transform: scale(1.05);
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+  </style>
 </head>
 <body>
-    <h1> 2nd Day of 30 days Voice Agent challenge by Murf AI</h1>
+  <h1>Text to Speech</h1>
 
-    <input type="text" id="textInput" placeholder="Enter text here" style="width: 400px; height: 25px; font-size: 18px;"/>
-    <button id="speakButton">Speak</button>
+  <textarea id="textInput" placeholder="Type something to convert into speech..."></textarea>
+  <button id="speakButton">Speak</button>
 
-    <script src="index.js"></script>
+  <script src="index.js"></script>
 </body>
 </html>
