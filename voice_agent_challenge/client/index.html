@@ -71,13 +71,32 @@
     button:active {
       transform: scale(0.98);
     }
+
+    audio {
+    display: block;
+    margin: 0 auto;
+    }
+
+    #resetRecord{
+      display: block;
+      margin: 0 auto;
+    }
   </style>
 </head>
 <body>
   <h1>Text to Speech</h1>
-
   <textarea id="textInput" placeholder="Type something to convert into speech..."></textarea>
   <button id="speakButton">Speak</button>
+
+  <h1>Echo Bot</h1>
+  <div id="echo-bot">
+    <button id="startRecord">Start Recording</button>
+    <button id="stopRecord" disabled>Stop Recording</button>
+    <br><br>
+    <audio id="audioPlayback" controls></audio>
+    <br>
+    <button id="resetRecord" disabled>Record Again</button>
+  </div>
 
   <script src="index.js"></script>
 </body>
