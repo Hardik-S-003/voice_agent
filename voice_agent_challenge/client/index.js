@@ -55,11 +55,36 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        audioPlayback.src = audioUrl;
-        resetButton.disabled = false;
-      };
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      audioPlayback.src = audioUrl;
+      resetButton.disabled = false;
+
+      // Upload after stopping
+      const formData = new FormData();
+      const fileName = `recording_${Date.now()}.webm`;
+      formData.append('audio', audioBlob, fileName);
+
+      const statusMessage = document.getElementById('uploadStatus');
+      statusMessage.textContent = "Uploading...";
+
+      fetch('/upload-audio', {
+        method: 'POST',
+        body: formData
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.filename) {
+            statusMessage.textContent = `Upload successful: ${data.filename} (${data.size_readable})`;
+          } else {
+            statusMessage.textContent = "Upload failed.";
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          statusMessage.textContent = "Error uploading file.";
+        });
+    };
 
       mediaRecorder.start();
 
