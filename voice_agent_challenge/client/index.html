@@ -91,20 +91,18 @@
 </head>
 <body>
   <h1>Text to Speech</h1>
-  <textarea id="textInput" placeholder="Type something to convert into speech..."></textarea>
+  <textarea id="textInput" placeholder="Enter text..."></textarea><br>
   <button id="speakButton">Speak</button>
 
   <h1>Echo Bot</h1>
-  <div id="echo-bot">
-    <button id="startRecord">Start Recording</button>
-    <button id="stopRecord" disabled>Stop Recording</button>
-    <br><br>
-    <audio id="audioPlayback" controls></audio>
-    <br>
-    <p id="uploadStatus" style="color: #00ffcc;"></p>
-    <br>
-    <button id="resetRecord" disabled>Record Again</button>
-  </div>
+  <div>
+  <button id="startRecord">Start Recording</button>
+  <button id="stopRecord" disabled>Stop Recording</button>
+  </div><br>
+  <audio id="audioPlayback" controls></audio><br>
+  <button id="resetRecord" disabled>Record Again</button>
+  <p id="uploadStatus"></p>
+  <p id="transcription"></p>
 
   <script src="index.js"></script>
 </body>
