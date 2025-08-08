@@ -1,5 +1,4 @@
 document.addEventListener('DOMContentLoaded', () => {
-  // Text to Speech
   const speakButton = document.getElementById('speakButton');
   const textInput = document.getElementById('textInput');
 
@@ -29,7 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Echo Bot
   let mediaRecorder;
   let audioChunks = [];
 
@@ -43,54 +41,40 @@ document.addEventListener('DOMContentLoaded', () => {
   startButton.addEventListener("click", async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
       audioChunks = [];
 
       mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        audioPlayback.src = audioUrl;
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
         resetButton.disabled = false;
 
         const formData = new FormData();
         const fileName = `recording_${Date.now()}.webm`;
         formData.append('audio', audioBlob, fileName);
 
-        statusMessage.textContent = "Uploading...";
+        statusMessage.textContent = "Processing via Murf + AssemblyAI...";
         transcriptionOutput.textContent = "";
 
-        fetch('/upload-audio', {
+        fetch('/tts/echo', {
           method: 'POST',
           body: formData
         })
           .then(res => res.json())
           .then(data => {
-            if (data.filename) {
-              statusMessage.textContent = `Upload successful: ${data.filename} (${data.size_readable})`;
+            if (data.audioUrl) {
+              audioPlayback.src = data.audioUrl;
+              audioPlayback.play();
+              statusMessage.textContent = "Playback complete in Murf voice!";
             } else {
-              statusMessage.textContent = "Upload failed.";
+              statusMessage.textContent = "Failed to process audio.";
             }
           })
           .catch(() => {
-            statusMessage.textContent = "Error uploading file.";
-          });
-
-        fetch('/transcribe/file', {
-          method: 'POST',
-          body: formData
-        })
-          .then(res => res.json())
-          .then(data => {
-            if (data.transcription) {
-              transcriptionOutput.textContent = `Transcript: ${data.transcription}`;
-            } else {
-              transcriptionOutput.textContent = "Transcription failed.";
-            }
-          })
-          .catch(() => {
-            transcriptionOutput.textContent = "Error during transcription.";
+            statusMessage.textContent = "Error during transcription/echo.";
           });
       };
 
@@ -99,7 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
       stopButton.disabled = false;
       resetButton.disabled = true;
     } catch (err) {
-      alert("Microphone access required.");
+      alert("Microphone access is required.");
     }
   });
 
