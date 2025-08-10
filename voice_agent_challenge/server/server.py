@@ -7,14 +7,22 @@ from tempfile import NamedTemporaryFile
 import subprocess
 import os
 import requests
-import json  
+import json
+import time
+import google.generativeai as genai
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+gemini_model = genai.GenerativeModel('gemini-1.5-flash')
 
 load_dotenv()
-API_KEY = os.getenv("API_KEY")
-AIAI_API_KEY = os.getenv("AI_API")
-LLM_API_KEY = os.getenv("LLM_API")  
+API_KEY = os.getenv("API_KEY")         
+AIAI_API_KEY = os.getenv("AI_API")     
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  
+
+if not API_KEY or not AIAI_API_KEY or not GEMINI_API_KEY:
+    print("Warning: One or more API keys missing in .env (API_KEY, AI_API, GEMINI_API_KEY)")
 
 app = Flask(__name__, static_folder='../client')
+
 client = Murf(api_key=API_KEY)
 aai.settings.api_key = AIAI_API_KEY
 
@@ -26,6 +34,7 @@ def home():
 def serve_js():
     return send_from_directory('../client', 'index.js')
 
+
 @app.route('/speak', methods=['POST'])
 def speak():
     data = request.get_json()
@@ -35,46 +44,30 @@ def speak():
         return jsonify({'error': 'Please enter some text'}), 400
 
     try:
-        audio_res = client.text_to_speech.generate(
-            text=text,
-            voice_id="en-IN-isha",
-        )
+        audio_res = client.text_to_speech.generate(text=text, voice_id="en-IN-isha")
         return jsonify({'audioUrl': audio_res.audio_file})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/upload-audio', methods=['POST'])
-def upload_audio():
-    if 'audio' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
 
-    file = request.files['audio']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-
-    filename = secure_filename(file.filename)
-    size_bytes = len(file.read())
-    file.seek(0)
-
-    def format_size(bytes):
-        for unit in ['B', 'KB', 'MB', 'GB']:
-            if bytes < 1024:
-                return f"{bytes:.2f} {unit}"
-            bytes /= 1024
-        return f"{bytes:.2f} TB"
-
-    return jsonify({
-        'filename': filename,
-        'content_type': file.content_type,
-        'size_readable': format_size(size_bytes)
-    }), 200
-
-@app.route('/tts/echo', methods=['POST'])
-def echo_tts():
+@app.route('/llm/query', methods=['POST'])
+def llm_query():
+    """
+    Accepts a file field named 'audio' (WebM from browser).
+    Steps:
+      1) save temp webm -> convert to wav via ffmpeg (16k mono)
+      2) transcribe using AssemblyAI
+      3) send transcript to Google AI Studio (Gemini/text-bison style) to get response
+      4) send response to Murf TTS -> return audio URL to client
+    """
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file provided'}), 400
 
     audio_file = request.files['audio']
+    if audio_file.filename == '':
+        return jsonify({'error': 'Empty filename'}), 400
+
+    filename = secure_filename(audio_file.filename)
 
     with NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
         audio_file.save(temp_audio.name)
@@ -84,91 +77,72 @@ def echo_tts():
 
     try:
         subprocess.run([
-            "ffmpeg", "-i", webm_path,
+            "ffmpeg", "-y",
+            "-i", webm_path,
             "-ar", "16000", "-ac", "1",
-            "-f", "wav", wav_path,
-            "-y"
-        ], check=True)
+            "-c:a", "pcm_s16le",
+            wav_path
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        config = aai.TranscriptionConfig(speech_model=aai.SpeechModel.best)
-        transcript = aai.Transcriber(config=config).transcribe(wav_path)
+        try:
+            config = aai.TranscriptionConfig(speech_model=aai.SpeechModel.best)
+            transcriber = aai.Transcriber(config=config)
+            transcript = transcriber.transcribe(wav_path)
+        except Exception as e:
+            return jsonify({'error': 'AssemblyAI transcription error', 'details': str(e)}), 500
 
         if transcript.status == "error":
-            raise RuntimeError(f"Transcription failed: {transcript.error}")
+            return jsonify({'error': 'Transcription failed', 'details': getattr(transcript, 'error', None)}), 500
 
-        transcription_text = transcript.text.strip()
+        transcription_text = (transcript.text or "").strip()
         if not transcription_text:
             return jsonify({'error': 'No speech detected in audio'}), 400
 
-        murf_audio = client.text_to_speech.generate(
-            text=transcription_text,
-            voice_id="en-IN-isha"
-        )
-
-        return jsonify({'audioUrl': murf_audio.audio_file})
-    except subprocess.CalledProcessError:
-        return jsonify({'error': 'Audio conversion failed using ffmpeg'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        os.remove(webm_path)
-        if os.path.exists(wav_path):
-            os.remove(wav_path)
-
-@app.route('/llm/query', methods=['POST'])
-def llm_query():
-    data = request.get_json()
-    user_input = data.get('text')
-
-    if not user_input:
-        return jsonify({'error': 'No input text provided'}), 400
-
-    print(f"[LLM QUERY] Received input: {user_input}")
-
-    try:
-        model_url = "https://api-inference.huggingface.co/models/bigscience/bloomz-560m"
-
-        headers = {
-            "Authorization": f"Bearer {LLM_API_KEY}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "inputs": user_input,
-            "parameters": {
-                "max_new_tokens": 200,
-                "temperature": 0.7,
-                "return_full_text": False
-            }
-        }
-
-        response = requests.post(model_url, headers=headers, json=payload)
-
-        print(f"[LLM QUERY] API Status Code: {response.status_code}")
+        print(f"[LLM QUERY] Transcript: {transcription_text}")
         try:
-            print(f"[LLM QUERY] Raw API Response: {json.dumps(response.json(), indent=2)}")
-        except Exception:
-            print("[LLM QUERY] Failed to parse API response as JSON.")
+            llm_response = gemini_model.generate_content(transcription_text)
+            llm_text = (llm_response.text or "").strip()
+        except Exception as e:
+            return jsonify({'error': 'LLM request failed', 'details': str(e)}), 500
 
-        if response.status_code != 200:
-            return jsonify({
-                'error': 'Failed to get response from LLM API',
-                'details': response.text
-            }), 500
+        if isinstance(llm_json, dict):
+            if "candidates" in llm_json and isinstance(llm_json["candidates"], list) and len(llm_json["candidates"]) > 0:
+                llm_text = llm_json["candidates"][0].get("output", "") or llm_json["candidates"][0].get("content", "")
+            if not llm_text:
+                if "output" in llm_json:
+                    llm_text = llm_json["output"]
+                elif "content" in llm_json:
+                    llm_text = llm_json["content"]
 
-        hf_result = response.json()
+        llm_text = (llm_text or "").strip()
+        if not llm_text:
+            llm_text = str(llm_json)[:1000]
 
-        generated_text = ""
-        if isinstance(hf_result, list) and "generated_text" in hf_result[0]:
-            generated_text = hf_result[0]["generated_text"].strip()
+        print(f"[LLM QUERY] LLM text length: {len(llm_text)}")
 
-        print(f"[LLM QUERY] Final Generated Text: {generated_text}")
+        try:
+            murf_audio = client.text_to_speech.generate(
+                text=llm_text,
+                voice_id="en-IN-isha"
+            )
+        except Exception as e:
+            return jsonify({'error': 'Murf TTS generation failed', 'details': str(e)}), 500
 
-        return jsonify({'response': generated_text})
+        return jsonify({'audioUrl': murf_audio.audio_file, 'transcript': transcription_text, 'llm_text': llm_text})
 
+    except subprocess.CalledProcessError:
+        return jsonify({'error': 'Audio conversion failed (ffmpeg)'}), 500
     except Exception as e:
-        print(f"[LLM QUERY] Error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Unexpected server error', 'details': str(e)}), 500
+    finally:
+        try:
+            if os.path.exists(webm_path):
+                os.remove(webm_path)
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+        except Exception:
+            pass
+
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)

@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+  // === Text to Speech (typed input) ===
   const speakButton = document.getElementById('speakButton');
   const textInput = document.getElementById('textInput');
 
@@ -28,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // === Echo Bot (recorded input) ===
   let mediaRecorder;
   let audioChunks = [];
 
@@ -40,16 +42,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
   startButton.addEventListener("click", async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 48000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false
+        }
       });
+
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus',
+        audioBitsPerSecond: 256000  
+      });
+
       audioChunks = [];
 
-      mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+      mediaRecorder.ondataavailable = e => {
+        if (e.data && e.data.size > 0) {
+          audioChunks.push(e.data);
+        }
+      };
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+
+        // Preview locally before sending
+        const localUrl = URL.createObjectURL(audioBlob);
+        audioPlayback.src = localUrl;
+        audioPlayback.play();
+
         resetButton.disabled = false;
 
         const formData = new FormData();
@@ -71,18 +94,22 @@ document.addEventListener('DOMContentLoaded', () => {
               statusMessage.textContent = "Playback complete in Murf voice!";
             } else {
               statusMessage.textContent = "Failed to process audio.";
+              console.error("Server error:", data);
             }
           })
-          .catch(() => {
+          .catch(err => {
+            console.error("Upload error:", err);
             statusMessage.textContent = "Error during transcription/echo.";
           });
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(1000);
+
       startButton.disabled = true;
       stopButton.disabled = false;
       resetButton.disabled = true;
     } catch (err) {
+      console.error("Mic access error:", err);
       alert("Microphone access is required.");
     }
   });
