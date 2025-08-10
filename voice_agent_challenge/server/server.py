@@ -9,22 +9,46 @@ import os
 import requests
 import json
 import time
+import logging
 import google.generativeai as genai
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO,
+                   format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 load_dotenv()
-API_KEY = os.getenv("API_KEY")         
-AIAI_API_KEY = os.getenv("AI_API")     
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  
+API_KEY = os.getenv("API_KEY")
+AIAI_API_KEY = os.getenv("AI_API")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not API_KEY or not AIAI_API_KEY or not GEMINI_API_KEY:
-    print("Warning: One or more API keys missing in .env (API_KEY, AI_API, GEMINI_API_KEY)")
+if not all([API_KEY, AIAI_API_KEY, GEMINI_API_KEY]):
+    missing_keys = []
+    if not API_KEY: missing_keys.append("API_KEY")
+    if not AIAI_API_KEY: missing_keys.append("AI_API")
+    if not GEMINI_API_KEY: missing_keys.append("GEMINI_API_KEY")
+    error_msg = f"Missing required API keys: {', '.join(missing_keys)}"
+    logger.error(error_msg)
+    raise ValueError(error_msg)
 
 app = Flask(__name__, static_folder='../client')
-
 client = Murf(api_key=API_KEY)
 aai.settings.api_key = AIAI_API_KEY
+genai.configure(api_key=GEMINI_API_KEY)
+gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+
+
+UPLOAD_DIR = Path("temp_uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+def cleanup_files(*files):
+    """Safely clean up temporary files"""
+    for file in files:
+        try:
+            if file and Path(file).exists():
+                Path(file).unlink()
+        except Exception as e:
+            logger.warning(f"Failed to delete temporary file {file}: {e}")
 
 @app.route('/')
 def home():
@@ -34,115 +58,111 @@ def home():
 def serve_js():
     return send_from_directory('../client', 'index.js')
 
-
 @app.route('/speak', methods=['POST'])
 def speak():
-    data = request.get_json()
-    text = data.get('text')
-
-    if not text:
-        return jsonify({'error': 'Please enter some text'}), 400
-
     try:
-        audio_res = client.text_to_speech.generate(text=text, voice_id="en-IN-isha")
+        data = request.get_json()
+        if not data or 'text' not in data:
+            return jsonify({'error': 'No text provided'}), 400
+
+        text = data['text'].strip()
+        if not text:
+            return jsonify({'error': 'Empty text provided'}), 400
+
+        logger.info(f"Generating speech for text: {text[:100]}...")
+        audio_res = client.text_to_speech.generate(
+            text=text,
+            voice_id="en-IN-isha"
+        )
         return jsonify({'audioUrl': audio_res.audio_file})
+
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Speech generation error: {str(e)}")
+        return jsonify({'error': f'Speech generation failed: {str(e)}'}), 500
 
-
-@app.route('/llm/query', methods=['POST'])
-def llm_query():
-    """
-    Accepts a file field named 'audio' (WebM from browser).
-    Steps:
-      1) save temp webm -> convert to wav via ffmpeg (16k mono)
-      2) transcribe using AssemblyAI
-      3) send transcript to Google AI Studio (Gemini/text-bison style) to get response
-      4) send response to Murf TTS -> return audio URL to client
-    """
+@app.route('/tts/echo', methods=['POST'])
+def process_audio():
+    """Handle audio processing pipeline"""
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file provided'}), 400
 
     audio_file = request.files['audio']
-    if audio_file.filename == '':
+    if not audio_file.filename:
         return jsonify({'error': 'Empty filename'}), 400
 
-    filename = secure_filename(audio_file.filename)
-
-    with NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
-        audio_file.save(temp_audio.name)
-        webm_path = temp_audio.name
-
-    wav_path = webm_path.replace(".webm", ".wav")
-
+    webm_path = wav_path = None
     try:
-        subprocess.run([
-            "ffmpeg", "-y",
-            "-i", webm_path,
-            "-ar", "16000", "-ac", "1",
-            "-c:a", "pcm_s16le",
-            wav_path
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        filename = secure_filename(audio_file.filename)
+        webm_path = UPLOAD_DIR / f"temp_{int(time.time())}_{filename}"
+        audio_file.save(webm_path)
 
-        try:
-            config = aai.TranscriptionConfig(speech_model=aai.SpeechModel.best)
-            transcriber = aai.Transcriber(config=config)
-            transcript = transcriber.transcribe(wav_path)
-        except Exception as e:
-            return jsonify({'error': 'AssemblyAI transcription error', 'details': str(e)}), 500
+        wav_path = webm_path.with_suffix('.wav')
+        conversion_command = [
+            "ffmpeg", "-y",
+            "-i", str(webm_path),
+            "-ar", "16000",
+            "-ac", "1",
+            "-c:a", "pcm_s16le",
+            "-q:a", "0",
+            "-af", "volume=1.5",
+            str(wav_path)
+        ]
+        
+        subprocess.run(conversion_command, 
+                      check=True, 
+                      stdout=subprocess.PIPE, 
+                      stderr=subprocess.PIPE)
+
+        config = aai.TranscriptionConfig(
+            speech_model=aai.SpeechModel.best,
+            language_detection=True
+        )
+        transcriber = aai.Transcriber(config=config)
+        transcript = transcriber.transcribe(str(wav_path))
 
         if transcript.status == "error":
-            return jsonify({'error': 'Transcription failed', 'details': getattr(transcript, 'error', None)}), 500
+            raise Exception(f"Transcription failed: {getattr(transcript, 'error', 'Unknown error')}")
 
         transcription_text = (transcript.text or "").strip()
         if not transcription_text:
             return jsonify({'error': 'No speech detected in audio'}), 400
 
-        print(f"[LLM QUERY] Transcript: {transcription_text}")
-        try:
-            llm_response = gemini_model.generate_content(transcription_text)
-            llm_text = (llm_response.text or "").strip()
-        except Exception as e:
-            return jsonify({'error': 'LLM request failed', 'details': str(e)}), 500
+        logger.info(f"Transcribed text: {transcription_text[:100]}...")
 
-        if isinstance(llm_json, dict):
-            if "candidates" in llm_json and isinstance(llm_json["candidates"], list) and len(llm_json["candidates"]) > 0:
-                llm_text = llm_json["candidates"][0].get("output", "") or llm_json["candidates"][0].get("content", "")
-            if not llm_text:
-                if "output" in llm_json:
-                    llm_text = llm_json["output"]
-                elif "content" in llm_json:
-                    llm_text = llm_json["content"]
-
-        llm_text = (llm_text or "").strip()
+        llm_response = gemini_model.generate_content(transcription_text)
+        llm_text = (llm_response.text or "").strip()
+        
         if not llm_text:
-            llm_text = str(llm_json)[:1000]
+            return jsonify({'error': 'Failed to generate response'}), 500
 
-        print(f"[LLM QUERY] LLM text length: {len(llm_text)}")
+        logger.info(f"Generated response length: {len(llm_text)}")
 
-        try:
-            murf_audio = client.text_to_speech.generate(
-                text=llm_text,
-                voice_id="en-IN-isha"
-            )
-        except Exception as e:
-            return jsonify({'error': 'Murf TTS generation failed', 'details': str(e)}), 500
+        murf_audio = client.text_to_speech.generate(
+            text=llm_text[:1000],  
+            voice_id="en-IN-isha"
+        )
 
-        return jsonify({'audioUrl': murf_audio.audio_file, 'transcript': transcription_text, 'llm_text': llm_text})
+        return jsonify({
+            'audioUrl': murf_audio.audio_file,
+            'transcript': transcription_text,
+            'llm_text': llm_text
+        })
 
-    except subprocess.CalledProcessError:
-        return jsonify({'error': 'Audio conversion failed (ffmpeg)'}), 500
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg conversion error: {e.stderr.decode() if e.stderr else str(e)}")
+        return jsonify({'error': 'Audio conversion failed'}), 500
+    
     except Exception as e:
-        return jsonify({'error': 'Unexpected server error', 'details': str(e)}), 500
+        logger.error(f"Processing error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
     finally:
-        try:
-            if os.path.exists(webm_path):
-                os.remove(webm_path)
-            if os.path.exists(wav_path):
-                os.remove(wav_path)
-        except Exception:
-            pass
+        cleanup_files(webm_path, wav_path)
 
+@app.errorhandler(Exception)
+def handle_error(error):
+    logger.error(f"Unhandled error: {str(error)}")
+    return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
