@@ -6,12 +6,37 @@ document.addEventListener('DOMContentLoaded', () => {
   let mediaRecorder;
   let audioChunks = [];
   let isRecording = false;
+  let autoStartNext = false;
 
   const startButton = document.getElementById("startRecord");
   const stopButton = document.getElementById("stopRecord");
   const resetButton = document.getElementById("resetRecord");
   const audioPlayback = document.getElementById("audioPlayback");
   const transcriptionOutput = document.getElementById("transcription");
+
+  const sessionIdEl = document.getElementById('sessionId');
+  const newSessionBtn = document.getElementById('newSession');
+
+  const params = new URLSearchParams(window.location.search);
+  let sessionId = params.get('session');
+  const genSessionId = () => `sess_${Date.now()}_${Math.floor(Math.random()*9000+1000)}`;
+
+  if (!sessionId) {
+    sessionId = genSessionId();
+    params.set('session', sessionId);
+    const newUrl = `${location.pathname}?${params.toString()}`;
+    history.replaceState({}, '', newUrl);
+  }
+  sessionIdEl.textContent = sessionId;
+
+  newSessionBtn.addEventListener('click', () => {
+    sessionId = genSessionId();
+    params.set('session', sessionId);
+    const newUrl = `${location.pathname}?${params.toString()}`;
+    history.replaceState({}, '', newUrl);
+    sessionIdEl.textContent = sessionId;
+    statusMessage.textContent = 'New session created';
+  });
 
   speakButton.addEventListener('click', async () => {
     const text = textInput.value.trim();
@@ -85,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
       mediaRecorder.onstop = async () => {
         console.log('Recording stopped');
         isRecording = false;
-        
+
         if (audioChunks.length === 0) {
           statusMessage.textContent = "No audio recorded";
           return;
@@ -94,14 +119,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
         console.log('Audio size:', audioBlob.size, 'bytes');
 
-        if (audioBlob.size < 1000) { 
+        if (audioBlob.size < 1000) {
           statusMessage.textContent = "Recording too short or empty";
           return;
         }
 
         const localUrl = URL.createObjectURL(audioBlob);
         audioPlayback.src = localUrl;
-        
+
         resetButton.disabled = false;
         statusMessage.textContent = "Processing audio...";
         transcriptionOutput.textContent = "";
@@ -111,27 +136,52 @@ document.addEventListener('DOMContentLoaded', () => {
         formData.append('audio', audioBlob, fileName);
 
         try {
-          const response = await fetch('/tts/echo', {
+          const response = await fetch(`/agent/chat/${encodeURIComponent(sessionId)}`, {
             method: 'POST',
             body: formData
           });
 
           const data = await response.json();
-          
+
           if (data.error) {
             throw new Error(data.error);
           }
 
           if (data.audioUrl) {
             audioPlayback.src = data.audioUrl;
+            audioPlayback.onended = () => {
+              statusMessage.textContent = "Assistant finished playing.";
+
+              if (data.transcript) {
+                transcriptionOutput.textContent = `You: ${data.transcript}`;
+              }
+              if (data.llm_text) {
+                const assistantLine = document.createElement('div');
+                assistantLine.textContent = `Assistant: ${data.llm_text}`;
+                assistantLine.style.marginTop = "6px";
+                assistantLine.style.color = "#aaffee";
+                transcriptionOutput.appendChild(assistantLine);
+              }
+
+              setTimeout(() => {
+                try {
+                  if (!mediaRecorder) {
+                    initializeMediaRecorder().then((ok) => {
+                      if (ok) startRecording();
+                    });
+                  } else {
+                    startRecording();
+                  }
+                } catch (err) {
+                  console.error("Auto start error:", err);
+                }
+              }, 500);
+            };
+
             await audioPlayback.play();
-            statusMessage.textContent = "Playback complete!";
-            
-            if (data.transcript) {
-              transcriptionOutput.textContent = `Transcript: ${data.transcript}`;
-            }
+            statusMessage.textContent = "Playing assistant response...";
           } else {
-            throw new Error("No audio URL received");
+            throw new Error("No audio URL received from server");
           }
         } catch (err) {
           console.error("Processing error:", err);
@@ -146,15 +196,16 @@ document.addEventListener('DOMContentLoaded', () => {
       return false;
     }
   };
-
-  startButton.addEventListener("click", async () => {
+  const startRecording = async () => {
     if (!mediaRecorder) {
-      const initialized = await initializeMediaRecorder();
-      if (!initialized) return;
+      const ok = await initializeMediaRecorder();
+      if (!ok) {
+        statusMessage.textContent = "Unable to access microphone.";
+        return;
+      }
     }
-
     try {
-      mediaRecorder.start(1000);
+      mediaRecorder.start(1000); 
       startButton.disabled = true;
       stopButton.disabled = false;
       resetButton.disabled = true;
@@ -162,6 +213,10 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error("Recording error:", err);
       statusMessage.textContent = "Error starting recording";
     }
+  };
+
+  startButton.addEventListener("click", async () => {
+    await startRecording();
   });
 
   stopButton.addEventListener("click", () => {

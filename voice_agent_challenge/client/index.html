@@ -63,6 +63,23 @@
       min-height: 24px;
       word-wrap: break-word;
     }
+
+    #sessionRow {
+      display:flex;
+      justify-content:center;
+      gap:8px;
+      align-items:center;
+      margin-bottom: 1rem;
+    }
+
+    #sessionId {
+      background:#222;
+      border:1px solid #444;
+      padding:6px 10px;
+      border-radius:8px;
+      color:#fff;
+      font-family:monospace;
+    }
   </style>
 </head>
 <body>
@@ -75,6 +92,13 @@
 
   <div class="card">
     <h1>Echo Bot</h1>
+
+    <div id="sessionRow">
+      <div>Session:</div>
+      <div id="sessionId"></div>
+      <button id="newSession">New Session</button>
+    </div>
+
     <div>
       <button id="startRecord">Start Recording</button>
       <button id="stopRecord" disabled>Stop Recording</button>
