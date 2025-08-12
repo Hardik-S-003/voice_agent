@@ -3,11 +3,9 @@ from murf import Murf
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 import assemblyai as aai
-from tempfile import NamedTemporaryFile
 import subprocess
 import os
 import requests
-import json
 import time
 import logging
 import google.generativeai as genai
@@ -22,25 +20,44 @@ API_KEY = os.getenv("API_KEY")
 AIAI_API_KEY = os.getenv("AI_API")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not all([API_KEY, AIAI_API_KEY, GEMINI_API_KEY]):
-    missing_keys = []
-    if not API_KEY: missing_keys.append("API_KEY")
-    if not AIAI_API_KEY: missing_keys.append("AI_API")
-    if not GEMINI_API_KEY: missing_keys.append("GEMINI_API_KEY")
-    error_msg = f"Missing required API keys: {', '.join(missing_keys)}"
-    logger.error(error_msg)
-    raise ValueError(error_msg)
-
 app = Flask(__name__, static_folder='../client')
-client = Murf(api_key=API_KEY)
-aai.settings.api_key = AIAI_API_KEY
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel('gemini-1.5-flash')
 
-CHAT_STORE = {}  # session_id -> list of {"role": "user"/"assistant", "text": "..."}
+client = None
+if API_KEY:
+    try:
+        client = Murf(api_key=API_KEY)
+    except Exception as e:
+        logger.warning(f"Could not initialize Murf client: {e}")
+else:
+    logger.info("MURF API key not found; TTS calls will fallback if possible.")
+
+if AIAI_API_KEY:
+    aai.settings.api_key = AIAI_API_KEY
+else:
+    logger.info("AssemblyAI API key not found; STT calls will fail unless provided.")
+
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        logger.warning(f"Could not initialize Gemini model: {e}")
+        gemini_model = None
+else:
+    logger.info("Gemini API key not found; LLM calls will fallback.")
+    gemini_model = None
+
+CHAT_STORE = {}  
 
 UPLOAD_DIR = Path("temp_uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+UPLOADS_SERVE_DIR = Path("uploads")
+UPLOADS_SERVE_DIR.mkdir(exist_ok=True)
+
+FALLBACK_AUDIO_NAME = "fallback.mp3"
+FALLBACK_AUDIO_PATH = UPLOADS_SERVE_DIR / FALLBACK_AUDIO_NAME
+FALLBACK_TEXT = "I am having trouble connecting right now."
+
 
 def cleanup_files(*files):
     """Safely clean up temporary files"""
@@ -51,16 +68,74 @@ def cleanup_files(*files):
         except Exception as e:
             logger.warning(f"Failed to delete temporary file {file}: {e}")
 
+
+def fallback_audio_url():
+    """
+    Return a fallback audio URL if available, otherwise None.
+    This path is served via /uploads/<filename>.
+    """
+    if FALLBACK_AUDIO_PATH.exists():
+        return f"/uploads/{FALLBACK_AUDIO_NAME}"
+    return None
+
+
+def ensure_fallback_audio():
+    """
+    If a fallback audio file doesn't exist, try to create it using Murf (if available).
+    This is optional — if Murf isn't configured or the creation fails, we simply log and continue.
+    """
+    if FALLBACK_AUDIO_PATH.exists():
+        logger.info("Fallback audio already exists.")
+        return True
+
+    if not client:
+        logger.warning("Cannot create fallback audio because Murf client is not configured.")
+        return False
+
+    try:
+        logger.info("Generating fallback audio via Murf...")
+        audio_res = client.text_to_speech.generate(text=FALLBACK_TEXT, voice_id="en-IN-isha")
+        audio_url = audio_res.audio_file
+        if not audio_url:
+            raise Exception("Murf returned no audio URL for fallback audio")
+
+        r = requests.get(audio_url, timeout=30)
+        r.raise_for_status()
+        with open(FALLBACK_AUDIO_PATH, "wb") as f:
+            f.write(r.content)
+        logger.info(f"Saved fallback audio to {FALLBACK_AUDIO_PATH}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to generate fallback audio via Murf: {e}")
+        return False
+
+try:
+    ensure_fallback_audio()
+except Exception as e:
+    logger.warning(f"ensure_fallback_audio() raised an exception: {e}")
+
+
 @app.route('/')
 def home():
     return send_from_directory('../client', 'index.html')
+
 
 @app.route('/index.js')
 def serve_js():
     return send_from_directory('../client', 'index.js')
 
+
+@app.route('/uploads/<path:filename>')
+def serve_uploads(filename):
+    return send_from_directory(str(UPLOADS_SERVE_DIR), filename)
+
+
 @app.route('/speak', methods=['POST'])
 def speak():
+    """
+    Existing TTS endpoint: take JSON {text} -> Murf TTS -> return audioUrl.
+    On error, returns fallback audio URL (if available) and error message.
+    """
     try:
         data = request.get_json()
         if not data or 'text' not in data:
@@ -71,21 +146,25 @@ def speak():
             return jsonify({'error': 'Empty text provided'}), 400
 
         logger.info(f"Generating speech for text: {text[:100]}...")
-        audio_res = client.text_to_speech.generate(
-            text=text,
-            voice_id="en-IN-isha"
-        )
+        if not client:
+            raise Exception("Murf API client not configured")
+
+        audio_res = client.text_to_speech.generate(text=text, voice_id="en-IN-isha")
         return jsonify({'audioUrl': audio_res.audio_file})
 
     except Exception as e:
-        logger.error(f"Speech generation error: {str(e)}")
-        return jsonify({'error': f'Speech generation failed: {str(e)}'}), 500
+        logger.error(f"Speech generation error: {e}")
+        return jsonify({
+            'audioUrl': fallback_audio_url(),
+            'error': f"Speech generation failed: {str(e)}"
+        }), 500
+
 
 @app.route('/tts/echo', methods=['POST'])
 def process_audio():
     """
-    Backwards-compatible endpoint. Previously used for Echo Bot v3.
-    Keeps behavior for reference; does not use chat history.
+    Backwards-compatible Echo Bot v3 endpoint (no chat memory).
+    Keeps previous behavior but with robust try/except and fallback handling.
     """
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file provided'}), 400
@@ -111,52 +190,68 @@ def process_audio():
             "-af", "volume=1.5",
             str(wav_path)
         ]
+        subprocess.run(conversion_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        subprocess.run(conversion_command,
-                      check=True,
-                      stdout=subprocess.PIPE,
-                      stderr=subprocess.PIPE)
+        # STT
+        transcription_text = ""
+        try:
+            if not AIAI_API_KEY:
+                raise Exception("AssemblyAI key not configured")
+            config = aai.TranscriptionConfig(
+                speech_model=aai.SpeechModel.best,
+                language_detection=True
+            )
+            transcriber = aai.Transcriber(config=config)
+            transcript = transcriber.transcribe(str(wav_path))
+            if transcript.status == "error":
+                raise Exception(getattr(transcript, "error", "Unknown transcription error"))
+            transcription_text = (transcript.text or "").strip()
+        except Exception as stt_err:
+            logger.error(f"STT error (tts/echo): {stt_err}")
+            return jsonify({'audioUrl': fallback_audio_url(), 'error': 'Speech recognition failed'}), 500
 
-        config = aai.TranscriptionConfig(
-            speech_model=aai.SpeechModel.best,
-            language_detection=True
-        )
-        transcriber = aai.Transcriber(config=config)
-        transcript = transcriber.transcribe(str(wav_path))
-
-        if transcript.status == "error":
-            raise Exception(f"Transcription failed: {getattr(transcript, 'error', 'Unknown error')}")
-
-        transcription_text = (transcript.text or "").strip()
         if not transcription_text:
             return jsonify({'error': 'No speech detected in audio'}), 400
 
         logger.info(f"Transcribed text: {transcription_text[:100]}...")
 
-        llm_response = gemini_model.generate_content(transcription_text)
-        llm_text = (llm_response.text or "").strip()
+        # LLM
+        try:
+            if not gemini_model:
+                raise Exception("Gemini model not configured")
+            llm_response = gemini_model.generate_content(transcription_text)
+            llm_text = (llm_response.text or "").strip()
+            if not llm_text:
+                raise Exception("LLM returned empty response")
+        except Exception as llm_err:
+            logger.error(f"LLM error (tts/echo): {llm_err}")
+            llm_text = FALLBACK_TEXT
 
-        if not llm_text:
-            return jsonify({'error': 'Failed to generate response'}), 500
-
-        murf_audio = client.text_to_speech.generate(
-            text=llm_text[:1000],
-            voice_id="en-IN-isha"
-        )
-
-        return jsonify({
-            'audioUrl': murf_audio.audio_file,
-            'transcript': transcription_text,
-            'llm_text': llm_text
-        })
+        try:
+            if not client:
+                raise Exception("Murf client not configured")
+            murf_audio = client.text_to_speech.generate(text=llm_text[:1000], voice_id="en-IN-isha")
+            return jsonify({
+                'audioUrl': murf_audio.audio_file,
+                'transcript': transcription_text,
+                'llm_text': llm_text
+            })
+        except Exception as tts_err:
+            logger.error(f"TTS error (tts/echo): {tts_err}")
+            return jsonify({
+                'audioUrl': fallback_audio_url(),
+                'transcript': transcription_text,
+                'llm_text': llm_text,
+                'error': 'TTS failed; served fallback audio'
+            }), 500
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg conversion error: {e.stderr.decode() if e.stderr else str(e)}")
-        return jsonify({'error': 'Audio conversion failed'}), 500
+        logger.error(f"FFmpeg conversion error (tts/echo): {e.stderr.decode() if e.stderr else e}")
+        return jsonify({'audioUrl': fallback_audio_url(), 'error': 'Audio conversion failed'}), 500
 
     except Exception as e:
-        logger.error(f"Processing error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Processing error (tts/echo): {e}")
+        return jsonify({'audioUrl': fallback_audio_url(), 'error': str(e)}), 500
 
     finally:
         cleanup_files(webm_path, wav_path)
@@ -165,17 +260,11 @@ def process_audio():
 @app.route('/agent/chat/<session_id>', methods=['POST'])
 def agent_chat(session_id):
     """
-    New endpoint for chat-based voice agent.
-    Flow:
-      - Accept audio file (same as /tts/echo)
-      - Convert to wav with ffmpeg
-      - Transcribe via AssemblyAI
-      - Append user transcript to CHAT_STORE[session_id]
-      - Build conversation string from previous messages + new user message
-      - Send to Gemini LLM (single-text prompt made from conversation)
-      - Save assistant response to chat history
-      - Generate TTS via Murf for assistant response
-      - Return audioUrl, transcript, llm_text (assistant reply) and history length
+    Chat with memory endpoint:
+    audio -> STT -> append user turn to CHAT_STORE -> LLM (with recent history) ->
+    append assistant turn -> TTS -> return audioUrl + transcript + llm_text.
+    Robust error handling: any failure results in fallback TTS/audio being returned
+    along with an 'error' field in the JSON.
     """
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file provided'}), 400
@@ -201,23 +290,24 @@ def agent_chat(session_id):
             "-af", "volume=1.5",
             str(wav_path)
         ]
+        subprocess.run(conversion_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        subprocess.run(conversion_command,
-                      check=True,
-                      stdout=subprocess.PIPE,
-                      stderr=subprocess.PIPE)
+        try:
+            if not AIAI_API_KEY:
+                raise Exception("AssemblyAI key not configured")
+            config = aai.TranscriptionConfig(
+                speech_model=aai.SpeechModel.best,
+                language_detection=True
+            )
+            transcriber = aai.Transcriber(config=config)
+            transcript = transcriber.transcribe(str(wav_path))
+            if transcript.status == "error":
+                raise Exception(getattr(transcript, "error", "Unknown transcription error"))
+            transcription_text = (transcript.text or "").strip()
+        except Exception as stt_err:
+            logger.error(f"[{session_id}] STT failed: {stt_err}")
+            return jsonify({'audioUrl': fallback_audio_url(), 'error': 'Speech recognition failed'}), 500
 
-        config = aai.TranscriptionConfig(
-            speech_model=aai.SpeechModel.best,
-            language_detection=True
-        )
-        transcriber = aai.Transcriber(config=config)
-        transcript = transcriber.transcribe(str(wav_path))
-
-        if transcript.status == "error":
-            raise Exception(f"Transcription failed: {getattr(transcript, 'error', 'Unknown error')}")
-
-        transcription_text = (transcript.text or "").strip()
         if not transcription_text:
             return jsonify({'error': 'No speech detected in audio'}), 400
 
@@ -234,41 +324,50 @@ def agent_chat(session_id):
             role = "User" if turn["role"] == "user" else "Assistant"
             text = turn["text"].replace("\n", " ")
             conv_lines.append(f"{role}: {text}")
-        conv_lines.append("Assistant:")  
+        conv_lines.append("Assistant:")
         conversation_prompt = "\n".join(conv_lines)
 
         logger.info(f"[{session_id}] Sending prompt to LLM (approx {len(conversation_prompt)} chars)")
 
-        llm_response = gemini_model.generate_content(conversation_prompt)
-        llm_text = (llm_response.text or "").strip()
-
-        if not llm_text:
-            raise Exception("LLM returned empty response")
-
-        logger.info(f"[{session_id}] LLM response length: {len(llm_text)}")
+        try:
+            if not gemini_model:
+                raise Exception("Gemini model not configured")
+            llm_response = gemini_model.generate_content(conversation_prompt)
+            llm_text = (llm_response.text or "").strip()
+            if not llm_text:
+                raise Exception("LLM returned empty response")
+        except Exception as llm_err:
+            logger.error(f"[{session_id}] LLM error: {llm_err}")
+            llm_text = FALLBACK_TEXT
 
         history.append({"role": "assistant", "text": llm_text})
         CHAT_STORE[session_id] = history
 
-        murf_audio = client.text_to_speech.generate(
-            text=llm_text[:1000],
-            voice_id="en-IN-isha"
-        )
+        try:
+            if not client:
+                raise Exception("Murf client not configured")
+            murf_audio = client.text_to_speech.generate(text=llm_text[:1000], voice_id="en-IN-isha")
+            audio_url = murf_audio.audio_file
+            if not audio_url:
+                raise Exception("Murf returned no audio URL")
+        except Exception as tts_err:
+            logger.error(f"[{session_id}] TTS error: {tts_err}")
+            audio_url = fallback_audio_url()
 
         return jsonify({
-            'audioUrl': murf_audio.audio_file,
+            'audioUrl': audio_url,
             'transcript': transcription_text,
             'llm_text': llm_text,
             'history_len': len(history)
         })
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg conversion error: {e.stderr.decode() if e.stderr else str(e)}")
-        return jsonify({'error': 'Audio conversion failed'}), 500
+        logger.error(f"FFmpeg conversion error: {e.stderr.decode() if e.stderr else e}")
+        return jsonify({'audioUrl': fallback_audio_url(), 'error': 'Audio conversion failed'}), 500
 
     except Exception as e:
-        logger.error(f"Agent processing error: {str(e)}")
-        return jsonify({'error': str(e)},), 500
+        logger.error(f"Agent processing error: {e}")
+        return jsonify({'audioUrl': fallback_audio_url(), 'error': str(e)}), 500
 
     finally:
         cleanup_files(webm_path, wav_path)
@@ -276,16 +375,15 @@ def agent_chat(session_id):
 
 @app.route('/agent/history/<session_id>', methods=['GET'])
 def get_history(session_id):
-    """
-    Optional helper endpoint: retrieve chat history for a session.
-    """
     history = CHAT_STORE.get(session_id, [])
     return jsonify({'session_id': session_id, 'history': history, 'history_len': len(history)})
 
+
 @app.errorhandler(Exception)
 def handle_error(error):
-    logger.error(f"Unhandled error: {str(error)}")
-    return jsonify({'error': 'Internal server error'}), 500
+    logger.error(f"Unhandled error: {error}")
+    return jsonify({'audioUrl': fallback_audio_url(), 'error': 'Internal server error'}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
