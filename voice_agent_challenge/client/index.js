@@ -1,102 +1,92 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const speakButton = document.getElementById('speakButton');
-  const textInput = document.getElementById('textInput');
-  const statusMessage = document.getElementById('uploadStatus');
+
+  const messagesEl = document.getElementById('messages');
+  const statusEl = document.getElementById('uploadStatus');
+  const micButton = document.getElementById('micButton');
+  const sessionIdEl = document.getElementById('sessionId');
+  const newSessionBtn = document.getElementById('newSession');
+  const audioPlayback = document.getElementById('audioPlayback'); 
 
   let mediaRecorder;
   let audioChunks = [];
   let isRecording = false;
 
-  const startButton = document.getElementById("startRecord");
-  const stopButton = document.getElementById("stopRecord");
-  const resetButton = document.getElementById("resetRecord");
-  const audioPlayback = document.getElementById("audioPlayback");
-  const transcriptionOutput = document.getElementById("transcription");
-
-  const sessionIdEl = document.getElementById('sessionId');
-  const newSessionBtn = document.getElementById('newSession');
-
   const params = new URLSearchParams(window.location.search);
-  let sessionId = params.get('session');
-  const genSessionId = () => `sess_${Date.now()}_${Math.floor(Math.random()*9000+1000)}`;
-
-  if (!sessionId) {
-    sessionId = genSessionId();
+  const genSessionId = () => `sess_${Date.now()}_${Math.floor(Math.random() * 9000 + 1000)}`;
+  let sessionId = params.get('session') || genSessionId();
+  if (!params.get('session')) {
     params.set('session', sessionId);
-    const newUrl = `${location.pathname}?${params.toString()}`;
-    history.replaceState({}, '', newUrl);
+    history.replaceState({}, '', `${location.pathname}?${params.toString()}`);
   }
   sessionIdEl.textContent = sessionId;
 
   newSessionBtn.addEventListener('click', () => {
     sessionId = genSessionId();
     params.set('session', sessionId);
-    const newUrl = `${location.pathname}?${params.toString()}`;
-    history.replaceState({}, '', newUrl);
+    history.replaceState({}, '', `${location.pathname}?${params.toString()}`);
     sessionIdEl.textContent = sessionId;
-    statusMessage.textContent = 'New session created';
+    statusEl.textContent = 'New session started.';
+    appendBot('New session created. Tap the mic to start talking.');
   });
 
   const FALLBACK_AUDIO = '/uploads/fallback.mp3';
 
+  const scrollToBottom = () => {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  };
+
+  function appendUser(text) {
+    const row = document.createElement('div');
+    row.className = 'msg user';
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    row.appendChild(avatar);
+    row.appendChild(bubble);
+    messagesEl.appendChild(row);
+    scrollToBottom();
+  }
+
+  function appendBot(text, smallNote) {
+    const row = document.createElement('div');
+    row.className = 'msg bot';
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text || '';
+    if (smallNote) {
+      const small = document.createElement('span');
+      small.className = 'small';
+      small.textContent = smallNote;
+      bubble.appendChild(small);
+    }
+    row.appendChild(avatar);
+    row.appendChild(bubble);
+    messagesEl.appendChild(row);
+    scrollToBottom();
+  }
+
   async function playAudioUrl(url) {
     try {
-      if (!url) throw new Error("No audio URL provided");
-      const a = new Audio(url);
-      await a.play();
-      return a;
-    } catch (err) {
-      console.warn("Failed to play audio URL:", err);
+      if (!url) throw new Error('No audio URL provided');
+      const audio = new Audio(url);
+      await audio.play();
+      return audio;
+    } catch (e) {
+      console.warn('Audio play failed, trying fallback:', e);
       try {
         const fb = new Audio(FALLBACK_AUDIO);
         await fb.play();
         return fb;
-      } catch (err2) {
-        console.error("Failed to play fallback audio:", err2);
+      } catch (e2) {
+        console.error('Fallback audio also failed:', e2);
         return null;
       }
     }
   }
-
-  speakButton.addEventListener('click', async () => {
-    const text = textInput.value.trim();
-    if (!text) {
-      alert("Please enter some text.");
-      return;
-    }
-
-    try {
-      statusMessage.textContent = "Generating speech...";
-      speakButton.disabled = true;
-
-      const response = await fetch('/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      });
-
-      const data = await response.json();
-      if (data.audioUrl) {
-        const audio = await playAudioUrl(data.audioUrl);
-        if (audio) {
-          audio.onended = () => {
-            statusMessage.textContent = "Playback complete!";
-            speakButton.disabled = false;
-          };
-        } else {
-          statusMessage.textContent = "Playback failed (fallback played or unavailable).";
-          speakButton.disabled = false;
-        }
-      } else {
-        throw new Error(data.error || "Audio generation failed.");
-      }
-    } catch (error) {
-      console.error("Error during TTS:", error);
-      statusMessage.textContent = "Error: " + (error.message || error);
-      await playAudioUrl(FALLBACK_AUDIO);
-      speakButton.disabled = false;
-    }
-  });
 
   const initializeMediaRecorder = async () => {
     try {
@@ -116,166 +106,111 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          audioChunks.push(e.data);
-        }
+        if (e.data && e.data.size > 0) audioChunks.push(e.data);
       };
 
       mediaRecorder.onstart = () => {
-        console.log('Recording started');
         isRecording = true;
         audioChunks = [];
-        statusMessage.textContent = "Recording...";
+        statusEl.textContent = 'Listening…';
+        micButton.classList.add('recording');
       };
 
       mediaRecorder.onstop = async () => {
-        console.log('Recording stopped');
         isRecording = false;
+        micButton.classList.remove('recording');
+        statusEl.textContent = 'Processing…';
 
         if (audioChunks.length === 0) {
-          statusMessage.textContent = "No audio recorded";
+          statusEl.textContent = 'No audio recorded.';
           return;
         }
 
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
-        console.log('Audio size:', audioBlob.size, 'bytes');
-
-        if (audioBlob.size < 1000) {
-          statusMessage.textContent = "Recording too short or empty";
+        const blob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+        if (blob.size < 1000) {
+          statusEl.textContent = 'Recording too short.';
           return;
         }
-
-        const localUrl = URL.createObjectURL(audioBlob);
-        audioPlayback.src = localUrl;
-
-        resetButton.disabled = false;
-        statusMessage.textContent = "Processing audio...";
-        transcriptionOutput.textContent = "";
 
         const formData = new FormData();
         const fileName = `recording_${Date.now()}.webm`;
-        formData.append('audio', audioBlob, fileName);
+        formData.append('audio', blob, fileName);
 
         try {
-          const response = await fetch(`/agent/chat/${encodeURIComponent(sessionId)}`, {
+          const resp = await fetch(`/agent/chat/${encodeURIComponent(sessionId)}`, {
             method: 'POST',
             body: formData
           });
-
-          const data = await response.json();
+          const data = await resp.json();
 
           if (data.error) {
-            console.error("Server returned error:", data.error);
-            statusMessage.textContent = `Server error: ${data.error}`;
+            statusEl.textContent = `Server error: ${data.error}`;
           }
 
-          const audioUrlToPlay = data.audioUrl || FALLBACK_AUDIO;
-          const played = await playAudioUrl(audioUrlToPlay);
+          if (data.transcript) appendUser(data.transcript);
+          if (data.llm_text) appendBot(data.llm_text);
 
-          if (data.transcript) {
-            transcriptionOutput.textContent = `You: ${data.transcript}`;
-          }
-          if (data.llm_text) {
-            const assistantLine = document.createElement('div');
-            assistantLine.textContent = `Assistant: ${data.llm_text}`;
-            assistantLine.style.marginTop = "6px";
-            assistantLine.style.color = "#aaffee";
-            transcriptionOutput.appendChild(assistantLine);
-          }
+          const toPlay = data.audioUrl || FALLBACK_AUDIO;
+          const playing = await playAudioUrl(toPlay);
 
-          if (played) {
-            played.onended = () => {
-              statusMessage.textContent = "Assistant finished playing.";
-              setTimeout(async () => {
-                try {
-                  if (!mediaRecorder) {
-                    const ok = await initializeMediaRecorder();
-                    if (ok) {
-                      startRecording();
-                    }
-                  } else {
-                    startRecording();
-                  }
-                } catch (err) {
-                  console.error("Auto-start recording error:", err);
-                }
-              }, 500);
+          if (playing) {
+            statusEl.textContent = 'Speaking…';
+            playing.onended = () => {
+              statusEl.textContent = 'Ready.';
+              setTimeout(() => { startRecording().catch(()=>{}); }, 450);
             };
-            statusMessage.textContent = "Playing assistant response...";
           } else {
-            statusMessage.textContent = "Could not play assistant audio (played fallback or none).";
+            statusEl.textContent = 'Could not play audio.';
           }
-        } catch (err) {
-          console.error("Processing error:", err);
-          statusMessage.textContent = `Error: ${err.message || err}`;
+        } catch (e) {
+          console.error('Processing error:', e);
+          statusEl.textContent = `Error: ${e.message || e}`;
+          appendBot('I had trouble connecting. You can try again.');
           await playAudioUrl(FALLBACK_AUDIO);
         }
       };
 
       return true;
     } catch (err) {
-      console.error("Mic access error:", err);
-      statusMessage.textContent = "Error: Microphone access denied";
+      console.error('Mic access error:', err);
+      statusEl.textContent = 'Microphone access denied.';
       return false;
     }
   };
 
-  const startRecording = async () => {
+  async function startRecording() {
     if (!mediaRecorder) {
       const ok = await initializeMediaRecorder();
-      if (!ok) {
-        statusMessage.textContent = "Unable to access microphone.";
-        return;
+      if (!ok) return;
+    }
+    if (mediaRecorder && mediaRecorder.state === 'inactive') {
+      try {
+        mediaRecorder.start(1000);
+      } catch (e) {
+        console.error('Start recording failed:', e);
+        statusEl.textContent = 'Error starting recording.';
       }
     }
-    try {
-      mediaRecorder.start(1000);
-      startButton.disabled = true;
-      stopButton.disabled = false;
-      resetButton.disabled = true;
-    } catch (err) {
-      console.error("Recording error:", err);
-      statusMessage.textContent = "Error starting recording";
-    }
-  };
+  }
 
-  startButton.addEventListener("click", async () => {
-    await startRecording();
-  });
-
-  stopButton.addEventListener("click", () => {
-    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
         mediaRecorder.stop();
-        startButton.disabled = false;
-        stopButton.disabled = true;
-      } catch (err) {
-        console.error("Error stopping recording:", err);
-        statusMessage.textContent = "Error stopping recording";
+      } catch (e) {
+        console.error('Stop recording failed:', e);
+        statusEl.textContent = 'Error stopping recording.';
       }
     }
-  });
+  }
 
-  resetButton.addEventListener("click", () => {
-    try {
-      audioPlayback.pause();
-      audioPlayback.src = "";
-      audioChunks = [];
-      statusMessage.textContent = "";
-      transcriptionOutput.textContent = "";
-      resetButton.disabled = true;
-      startButton.disabled = false;
-    } catch (err) {
-      console.error("Error resetting:", err);
-      statusMessage.textContent = "Error resetting recording";
+  micButton.addEventListener('click', async () => {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+      await startRecording();
+    } else {
+      stopRecording();
     }
   });
 
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    console.log("Media devices supported");
-  } else {
-    console.error("Media devices not supported");
-    statusMessage.textContent = "Error: Your browser doesn't support audio recording";
-    startButton.disabled = true;
-  }
+  statusEl.textContent = 'Ready. Tap the mic and speak.';
 });
