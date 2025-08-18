@@ -122,11 +122,19 @@
       color: var(--muted);
       font-size: 0.92rem;
     }
+    .transcript {
+      margin-top: 1rem;
+      background: #1a1a22;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 1rem;
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>🎙️ Real-Time Audio Streaming (WebSocket)</h1>
+    <h1>🎙️ Real-Time Audio Streaming & Transcription</h1>
     <p class="sub">Streams microphone audio to the server as <code>webm/opus</code> chunks and saves to <code>/uploads</code>.</p>
 
     <div class="row">
@@ -140,6 +148,11 @@
       <div class="pill">Session: <strong id="sessionText" style="margin-left:6px;">–</strong></div>
       <div class="pill">Bytes sent: <strong id="bytesText" style="margin-left:6px;">0</strong></div>
       <div class="pill">Saved file: <strong id="fileText" style="margin-left:6px;">–</strong></div>
+    </div>
+
+    <div class="transcript">
+      <strong>Transcript:</strong>
+      <p id="transcriptText" style="margin: 0.5rem 0 0 0;">–</p>
     </div>
 
     <p class="foot">

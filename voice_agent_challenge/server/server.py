@@ -5,15 +5,25 @@ import logging
 from pathlib import Path
 from flask import Flask, send_from_directory, request, jsonify
 from flask_sock import Sock
+import assemblyai as aai
+from dotenv import load_dotenv
+from simple_websocket import ConnectionClosed
+
+# Load environment variables
+load_dotenv()
+ASSEMBLYAI_API_KEY = os.getenv('AI_API')
+
+# Configure AssemblyAI
+aai.settings.api_key = ASSEMBLYAI_API_KEY
 
 # ----------------------------
 # Logging
 # ----------------------------
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("voiceagent-ws")
+logger = logging.getLogger(__name__)
 
 # ----------------------------
 # App & Paths
@@ -65,11 +75,38 @@ def ws_audio(ws):
         logger.info(f"[{safe_sid}] Recording -> {file_path}")
         return filename
 
+    def handle_transcription(audio_file):
+        try:
+            if not ASSEMBLYAI_API_KEY:
+                raise Exception("AssemblyAI key not configured")
+            
+            config = aai.TranscriptionConfig(
+                speech_model=aai.SpeechModel.best,
+                language_detection=True
+            )
+            transcriber = aai.Transcriber(config=config)
+            transcript = transcriber.transcribe(str(audio_file))
+            
+            if transcript.status == "error":
+                raise Exception(getattr(transcript, "error", "Unknown transcription error"))
+            
+            if transcript.text:
+                logger.info(f"[{session_id}] Transcript: {transcript.text}")
+                return transcript.text
+            return None
+        except Exception as e:
+            logger.error(f"Transcription error: {e}")
+            return None
+
     try:
         while True:
-            data = ws.receive()
-            if data is None:
-                logger.info("WebSocket disconnected by client")
+            try:
+                data = ws.receive()
+                if data is None:
+                    logger.info("WebSocket received None data")
+                    break
+            except ConnectionClosed:
+                logger.info("WebSocket connection closed by client")
                 break
 
             if isinstance(data, (bytes, bytearray)):
@@ -77,6 +114,7 @@ def ws_audio(ws):
                     session_id = f"session_{int(time.time())}"
                     open_file_for_session(session_id)
                 fhandle.write(data)
+
             else:
                 try:
                     msg = json.loads(data)
@@ -89,24 +127,45 @@ def ws_audio(ws):
                     session_id = msg.get("session") or f"session_{int(time.time())}"
                     open_file_for_session(session_id)
                     ws.send(json.dumps({"type": "ack", "session": session_id}))
+
                 elif mtype == "stop":
                     if fhandle:
                         fhandle.flush()
                         fhandle.close()
                         fhandle = None
+                        
+                        # Handle transcription
+                        if file_path and file_path.exists():
+                            transcript_text = handle_transcription(file_path)
+                            if transcript_text:
+                                try:
+                                    ws.send(json.dumps({
+                                        "type": "transcript",
+                                        "text": transcript_text,
+                                        "is_final": True
+                                    }))
+                                except Exception as e:
+                                    logger.error(f"Error sending transcript: {e}")
+                        
                         rel = file_path.name if file_path else None
                         logger.info(f"[{session_id}] Saved: {file_path}")
-                        ws.send(json.dumps({
-                            "type": "saved",
-                            "file": rel,
-                            "url": f"/uploads/{rel}" if rel else None
-                        }))
+                        try:
+                            ws.send(json.dumps({
+                                "type": "saved",
+                                "file": rel,
+                                "url": f"/uploads/{rel}" if rel else None
+                            }))
+                        except Exception as e:
+                            logger.error(f"Error sending saved message: {e}")
                     else:
-                        ws.send(json.dumps({"type": "error", "message": "No active recording"}))
+                        try:
+                            ws.send(json.dumps({"type": "error", "message": "No active recording"}))
+                        except Exception as e:
+                            logger.error(f"Error sending error message: {e}")
+
                 elif mtype == "ping":
                     ws.send(json.dumps({"type": "pong", "t": time.time()}))
-                else:
-                    logger.info(f"Unknown control message: {msg}")
+
     except Exception as e:
         logger.exception(f"WebSocket error: {e}")
         try:
@@ -118,8 +177,9 @@ def ws_audio(ws):
             if fhandle and not fhandle.closed:
                 fhandle.flush()
                 fhandle.close()
-        except Exception:
-            pass
+                logger.info("Closed file handle in finally block")
+        except Exception as e:
+            logger.error(f"Error closing file handle: {e}")
         logger.info("WebSocket handler finished")
 
 # ----------------------------
