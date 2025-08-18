@@ -1,4 +1,4 @@
-# 🎙 AI Voice Agent – 30 Days of AI Voice Agents
+# 🎙 AI Voice Agent 
 
 An end-to-end **voice-driven conversational AI assistant** built as part of the **Murf AI 30 Days of AI Voice Agents Challenge**.  
 The assistant can **listen**, **understand**, **think**, and **speak back** — all in a smooth, hands-free conversation loop.
@@ -83,7 +83,7 @@ The AI Voice Agent is built using a **client–server model** with the following
 - **Backend:** Flask (Python), FFmpeg  
 - **APIs:** Murf AI (TTS), AssemblyAI (STT), Google Gemini (LLM)  
 - **Data Storage:** In-memory Python dictionary for session-based chat history
-  
+
 ---
 
 ## 🚀 Setup Instructions
