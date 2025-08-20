@@ -1,435 +1,332 @@
-document.addEventListener('DOMContentLoaded', () => {
-
-  const messagesEl = document.getElementById('messages');
-  const statusEl = document.getElementById('uploadStatus');
-  const micButton = document.getElementById('micButton');
-  const sessionIdEl = document.getElementById('sessionId');
-  const newSessionBtn = document.getElementById('newSession');
-  const streamingToggle = document.getElementById('streamingToggle');
-
-  let mediaRecorder;
-  let audioChunks = [];
-  let isRecording = false;
-  let socket;
-  let streamingMode = false;
-  let streamingSession = null;
-
-  const params = new URLSearchParams(window.location.search);
-  const genSessionId = () => `sess_${Date.now()}_${Math.floor(Math.random() * 9000 + 1000)}`;
-  let sessionId = params.get('session') || genSessionId();
-  if (!params.get('session')) {
-    params.set('session', sessionId);
-    history.replaceState({}, '', `${location.pathname}?${params.toString()}`);
-  }
-  sessionIdEl.textContent = sessionId;
-
-  const FALLBACK_AUDIO = '/uploads/fallback.mp3';
-
-  // Initialize Socket.IO connection
-  const initializeSocket = () => {
-    socket = io();
+document.addEventListener('DOMContentLoaded', function() {
+    const startBtn = document.getElementById('startRecording');
+    const stopBtn = document.getElementById('stopRecording');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const statusText = document.getElementById('statusText');
+    const transcriptEl = document.getElementById('transcript');
+    const responseEl = document.getElementById('response');
+    const timerEl = document.getElementById('timer');
     
-    socket.on('connect', () => {
-      console.log('WebSocket connected');
-      statusEl.textContent = 'Connected to server.';
-    });
+    let mediaRecorder;
+    let audioChunks = [];
+    let timerInterval;
+    let seconds = 0;
+    let sessionId = null;
+    let audioStream;
+    let audioContext;
+    let analyser;
     
-    socket.on('disconnect', () => {
-      console.log('WebSocket disconnected');
-      statusEl.textContent = 'Disconnected from server.';
-    });
+    // Debug: Check supported MIME types
+    console.log('Supported audio types:');
+    console.log('audio/webm;codecs=opus:', MediaRecorder.isTypeSupported('audio/webm;codecs=opus'));
+    console.log('audio/webm:', MediaRecorder.isTypeSupported('audio/webm'));
+    console.log('audio/mp4:', MediaRecorder.isTypeSupported('audio/mp4'));
+    console.log('audio/wav:', MediaRecorder.isTypeSupported('audio/wav'));
     
-    socket.on('connection_established', (data) => {
-      console.log('Connection established:', data);
-    });
-    
-    socket.on('echo_message', (data) => {
-      console.log('Echo received:', data);
-      appendBot(`Echo: ${data.echo}`);
-    });
-    
-    socket.on('streaming_started', (data) => {
-      console.log('Streaming started:', data);
-      statusEl.textContent = 'Real-time streaming active.';
-    });
-    
-    socket.on('partial_transcript', (data) => {
-      updatePartialTranscript(data.text, data.is_final);
-    });
-    
-    socket.on('turn_ended', (data) => {
-      console.log('Turn ended:', data);
-      handleTurnEnd(data.final_transcript);
-    });
-    
-    socket.on('agent_response', (data) => {
-      console.log('Agent response received:', data);
-      handleAgentResponse(data);
-    });
-    
-    socket.on('streaming_stopped', (data) => {
-      console.log('Streaming stopped:', data);
-      statusEl.textContent = 'Streaming stopped.';
-      streamingSession = null;
-    });
-    
-    socket.on('error', (data) => {
-      console.error('Socket error:', data);
-      statusEl.textContent = `Error: ${data.message}`;
-    });
-  };
-
-  // Initialize socket connection
-  initializeSocket();
-
-  newSessionBtn.addEventListener('click', () => {
-    sessionId = genSessionId();
-    params.set('session', sessionId);
-    history.replaceState({}, '', `${location.pathname}?${params.toString()}`);
-    sessionIdEl.textContent = sessionId;
-    statusEl.textContent = 'New session started.';
-    appendBot('New session created. Toggle streaming mode or tap the mic to start talking.');
-    
-    // Clear messages
-    const messages = messagesEl.querySelectorAll('.msg:not(.welcome)');
-    messages.forEach(msg => msg.remove());
-  });
-
-  const scrollToBottom = () => {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-  };
-
-  function appendUser(text, isPartial = false) {
-    // Remove existing partial message
-    const existingPartial = messagesEl.querySelector('.msg.user.partial');
-    if (existingPartial) {
-      existingPartial.remove();
-    }
-    
-    const row = document.createElement('div');
-    row.className = `msg user${isPartial ? ' partial' : ''}`;
-    const avatar = document.createElement('div');
-    avatar.className = 'avatar';
-    const bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    bubble.textContent = text;
-    
-    if (isPartial) {
-      bubble.style.opacity = '0.7';
-      bubble.style.fontStyle = 'italic';
-    }
-    
-    row.appendChild(avatar);
-    row.appendChild(bubble);
-    messagesEl.appendChild(row);
-    scrollToBottom();
-  }
-
-  function appendBot(text, smallNote) {
-    const row = document.createElement('div');
-    row.className = 'msg bot';
-    const avatar = document.createElement('div');
-    avatar.className = 'avatar';
-    const bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    bubble.textContent = text || '';
-    if (smallNote) {
-      const small = document.createElement('span');
-      small.className = 'small';
-      small.textContent = smallNote;
-      bubble.appendChild(small);
-    }
-    row.appendChild(avatar);
-    row.appendChild(bubble);
-    messagesEl.appendChild(row);
-    scrollToBottom();
-  }
-
-  function updatePartialTranscript(text, isFinal) {
-    if (isFinal) {
-      // Remove partial and add final
-      const existingPartial = messagesEl.querySelector('.msg.user.partial');
-      if (existingPartial) {
-        existingPartial.remove();
-      }
-      // Don't add final here - wait for turn_ended
-    } else {
-      // Update or create partial transcript
-      appendUser(text, true);
-    }
-  }
-
-  function handleTurnEnd(finalTranscript) {
-    // Remove partial transcript and add final
-    const existingPartial = messagesEl.querySelector('.msg.user.partial');
-    if (existingPartial) {
-      existingPartial.remove();
-    }
-    
-    if (finalTranscript.trim()) {
-      appendUser(finalTranscript);
-      statusEl.textContent = 'Processing response...';
-    }
-  }
-
-  async function handleAgentResponse(data) {
-    const { transcript, llm_text, audioUrl } = data;
-    
-    // Add bot response to UI
-    if (llm_text) {
-      appendBot(llm_text);
-    }
-    
-    // Play audio response
-    const toPlay = audioUrl || FALLBACK_AUDIO;
-    const playing = await playAudioUrl(toPlay);
-    
-    if (playing) {
-      statusEl.textContent = 'Speaking…';
-      playing.onended = () => {
-        statusEl.textContent = 'Ready for next input.';
-        // Reset turn state
-        socket.emit('reset_turn', { session_id: sessionId });
-        // In streaming mode, automatically restart listening
-        if (streamingMode && streamingSession) {
-          setTimeout(() => {
-            startRecording().catch(() => {});
-          }, 500);
-        }
-      };
-    } else {
-      statusEl.textContent = 'Could not play audio.';
-    }
-  }
-
-  async function playAudioUrl(url) {
-    try {
-      if (!url) throw new Error('No audio URL provided');
-      const audio = new Audio(url);
-      await audio.play();
-      return audio;
-    } catch (e) {
-      console.warn('Audio play failed, trying fallback:', e);
-      try {
-        const fb = new Audio(FALLBACK_AUDIO);
-        await fb.play();
-        return fb;
-      } catch (e2) {
-        console.error('Fallback audio also failed:', e2);
-        return null;
-      }
-    }
-  }
-
-  const initializeMediaRecorder = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: 44100,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: false,
-          autoGainControl: true
-        }
-      });
-
-      const mimeType = streamingMode ? 'audio/webm;codecs=opus' : 'audio/webm;codecs=opus';
-      
-      mediaRecorder = new MediaRecorder(stream, {
-        mimeType: mimeType,
-        audioBitsPerSecond: 128000
-      });
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          if (streamingMode && streamingSession) {
-            // Stream audio data in real-time
-            streamAudioData(e.data);
-          } else {
-            // Accumulate for batch processing
-            audioChunks.push(e.data);
-          }
-        }
-      };
-
-      mediaRecorder.onstart = () => {
-        isRecording = true;
-        audioChunks = [];
-        statusEl.textContent = streamingMode ? 'Streaming...' : 'Listening…';
-        micButton.classList.add('recording');
-        
-        // Start streaming session if in streaming mode
-        if (streamingMode && !streamingSession) {
-          startStreamingSession();
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        isRecording = false;
-        micButton.classList.remove('recording');
-        
-        if (streamingMode) {
-          // In streaming mode, don't process chunks here
-          statusEl.textContent = 'Processing...';
-          return;
-        }
-        
-        // Legacy batch processing mode
-        statusEl.textContent = 'Processing…';
-
-        if (audioChunks.length === 0) {
-          statusEl.textContent = 'No audio recorded.';
-          return;
-        }
-
-        const blob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
-        if (blob.size < 1000) {
-          statusEl.textContent = 'Recording too short.';
-          return;
-        }
-
-        const formData = new FormData();
-        const fileName = `recording_${Date.now()}.webm`;
-        formData.append('audio', blob, fileName);
-
-        try {
-          const resp = await fetch(`/agent/chat/${encodeURIComponent(sessionId)}`, {
+    // Initialize session
+    function initSession() {
+        fetch('/api/start_session', {
             method: 'POST',
-            body: formData
-          });
-          const data = await resp.json();
-
-          if (data.error) {
-            statusEl.textContent = `Server error: ${data.error}`;
-          }
-
-          if (data.transcript) appendUser(data.transcript);
-          if (data.llm_text) appendBot(data.llm_text);
-
-          const toPlay = data.audioUrl || FALLBACK_AUDIO;
-          const playing = await playAudioUrl(toPlay);
-
-          if (playing) {
-            statusEl.textContent = 'Speaking…';
-            playing.onended = () => {
-              statusEl.textContent = 'Ready.';
-              setTimeout(() => { startRecording().catch(()=>{}); }, 450);
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            sessionId = data.session_id;
+            console.log('Session started:', sessionId);
+            statusText.textContent = 'Ready to record';
+        })
+        .catch(error => {
+            console.error('Error starting session:', error);
+            statusText.textContent = 'Failed to start session. Check if server is running.';
+            responseEl.innerHTML = '<p class="error">Could not connect to server. Make sure the Flask server is running on port 5000.</p>';
+        });
+    }
+    
+    // Convert audio to WAV format with proper specifications
+    function convertToWav(audioBuffer) {
+        try {
+            const buffer = audioBuffer.getChannelData(0); // Get mono channel
+            const length = buffer.length;
+            const wavBuffer = new ArrayBuffer(44 + length * 2);
+            const view = new DataView(wavBuffer);
+            
+            // Write WAV header
+            const writeString = function(view, offset, string) {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
             };
-          } else {
-            statusEl.textContent = 'Could not play audio.';
-          }
-        } catch (e) {
-          console.error('Processing error:', e);
-          statusEl.textContent = `Error: ${e.message || e}`;
-          appendBot('I had trouble connecting. You can try again.');
-          await playAudioUrl(FALLBACK_AUDIO);
+            
+            writeString(view, 0, 'RIFF'); // RIFF header
+            view.setUint32(4, 36 + length * 2, true); // RIFF chunk length
+            writeString(view, 8, 'WAVE'); // WAVE header
+            writeString(view, 12, 'fmt '); // format chunk identifier
+            view.setUint32(16, 16, true); // format chunk length
+            view.setUint16(20, 1, true); // sample format (1 = PCM)
+            view.setUint16(22, 1, true); // number of channels (mono)
+            view.setUint32(24, 16000, true); // sample rate (16kHz)
+            view.setUint32(28, 16000 * 2, true); // byte rate (sample rate * bytes per sample * channels)
+            view.setUint16(32, 2, true); // block align (bytes per sample * channels)
+            view.setUint16(34, 16, true); // bits per sample (16-bit)
+            writeString(view, 36, 'data'); // data chunk identifier
+            view.setUint32(40, length * 2, true); // data chunk length
+            
+            // Write audio data
+            let offset = 44;
+            for (let i = 0; i < length; i++) {
+                const sample = Math.max(-1, Math.min(1, buffer[i])); // Clamp to [-1, 1]
+                view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+                offset += 2;
+            }
+            
+            return new Blob([wavBuffer], { type: 'audio/wav' });
+        } catch (error) {
+            console.error('Error converting to WAV:', error);
+            // Fallback: return the original audio
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            return audioBlob;
         }
-      };
-
-      return true;
-    } catch (err) {
-      console.error('Mic access error:', err);
-      statusEl.textContent = 'Microphone access denied.';
-      return false;
-    }
-  };
-
-  function startStreamingSession() {
-    if (!socket || !socket.connected) {
-      statusEl.textContent = 'Not connected to server.';
-      return;
     }
     
-    streamingSession = sessionId;
-    socket.emit('start_streaming', { session_id: sessionId });
-  }
-
-  function streamAudioData(audioBlob) {
-    if (!socket || !streamingSession) return;
+    // Send audio via HTTP
+    function sendAudioViaHTTP(audioBlob) {
+        statusText.textContent = 'Sending audio to server...';
+        
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.wav');
+        
+        // Add session ID to headers if available
+        const headers = {};
+        if (sessionId) {
+            headers['X-Session-ID'] = sessionId;
+        }
+        
+        fetch('/api/transcribe', {
+            method: 'POST',
+            body: formData,
+            headers: headers
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(errorData => {
+                    throw new Error(errorData.error || `Server error: ${response.status}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.transcription && data.response) {
+                transcriptEl.innerHTML = `<p>${data.transcription}</p>`;
+                responseEl.innerHTML = `<p>${data.response}</p>`;
+                statusText.textContent = 'Response received';
+                
+                // Update session ID if returned
+                if (data.session_id) {
+                    sessionId = data.session_id;
+                }
+            } else if (data.error) {
+                console.error('API error:', data.error);
+                statusText.textContent = `Error: ${data.error}`;
+                responseEl.innerHTML = `<p class="error">Error: ${data.error}</p>`;
+            }
+        })
+        .catch(error => {
+            console.error('HTTP request failed:', error);
+            statusText.textContent = 'Request failed';
+            responseEl.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+        });
+    }
     
-    // Convert blob to base64 for transmission
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64Data = reader.result.split(',')[1]; // Remove data:audio/webm;base64, prefix
-      socket.emit('audio_data', {
-        session_id: sessionId,
-        audio: base64Data
-      });
-    };
-    reader.readAsDataURL(audioBlob);
-  }
-
-  async function startRecording() {
-    if (!mediaRecorder) {
-      const ok = await initializeMediaRecorder();
-      if (!ok) return;
+    // Process and send audio
+    function processAndSendAudio() {
+        if (audioChunks.length === 0) {
+            console.error('No audio data recorded');
+            statusText.textContent = 'No audio recorded. Please try again.';
+            return;
+        }
+        
+        // Combine all audio chunks
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        
+        // For now, send the audio as-is and let the server handle conversion
+        // In a production app, you'd do the conversion here
+        sendAudioViaHTTP(audioBlob);
+        
+        // Clear chunks
+        audioChunks = [];
     }
-    if (mediaRecorder && mediaRecorder.state === 'inactive') {
-      try {
-        // In streaming mode, use shorter intervals for real-time processing
-        const interval = streamingMode ? 500 : 1000;
-        mediaRecorder.start(interval);
-      } catch (e) {
-        console.error('Start recording failed:', e);
-        statusEl.textContent = 'Error starting recording.';
-      }
+    
+    // Check if browser supports media recording
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Your browser doesn't support audio recording. Please use a modern browser.");
+        startBtn.disabled = true;
+        responseEl.innerHTML = '<p class="error">Browser does not support audio recording.</p>';
+        return;
     }
-  }
-
-  function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-      mediaRecorder.stop();
-      
-      if (streamingMode && streamingSession) {
-        socket.emit('stop_streaming', { session_id: sessionId });
-      }
-    }
-  }
-
-  // Add streaming toggle functionality
-  if (streamingToggle) {
-    streamingToggle.addEventListener('change', (e) => {
-      streamingMode = e.target.checked;
-      const modeText = streamingMode ? 'Real-time Streaming' : 'Batch Processing';
-      statusEl.textContent = `Mode: ${modeText}`;
-      
-      // Stop current recording if switching modes
-      if (isRecording) {
-        stopRecording();
-      }
-      
-      // Reset media recorder to reinitialize with new settings
-      mediaRecorder = null;
-      
-      appendBot(`Switched to ${modeText} mode.`, 
-        streamingMode ? 'Real-time transcription enabled' : 'Traditional recording mode');
+    
+    // Initialize session
+    initSession();
+    
+    // Start recording
+    startBtn.addEventListener('click', async function() {
+        try {
+            // Try to get audio with simple constraints first
+            audioStream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    channelCount: 1, // mono
+                    echoCancellation: true,
+                    noiseSuppression: true
+                    // Don't specify sampleRate - let browser choose
+                } 
+            });
+            
+            // Set up audio monitoring to check if we're getting sound
+            audioContext = new AudioContext();
+            const source = audioContext.createMediaStreamSource(audioStream);
+            analyser = audioContext.createAnalyser();
+            source.connect(analyser);
+            
+            // Check audio levels
+            const checkAudioLevel = () => {
+                if (!analyser) return;
+                
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(dataArray);
+                const volume = Math.max(...dataArray);
+                console.log('Audio level:', volume);
+                
+                if (volume > 5) {
+                    console.log('Audio is being captured');
+                }
+            };
+            
+            // Check audio levels every second
+            const audioCheckInterval = setInterval(checkAudioLevel, 1000);
+            
+            // Try to find a supported MIME type
+            let options = {};
+            if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                options.mimeType = 'audio/webm;codecs=opus';
+            } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+                options.mimeType = 'audio/webm';
+            } else {
+                console.log('Using browser-default audio format');
+            }
+            
+            mediaRecorder = new MediaRecorder(audioStream, options);
+            
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                    console.log('Audio chunk received:', event.data.size, 'bytes');
+                }
+            };
+            
+            mediaRecorder.onstop = () => {
+                // Stop audio monitoring
+                clearInterval(audioCheckInterval);
+                if (audioContext) {
+                    audioContext.close();
+                    audioContext = null;
+                }
+                
+                // Process and send the audio
+                processAndSendAudio();
+                
+                // Stop all tracks
+                if (audioStream) {
+                    audioStream.getTracks().forEach(track => track.stop());
+                    audioStream = null;
+                }
+            };
+            
+            mediaRecorder.onerror = (event) => {
+                console.error('MediaRecorder error:', event.error);
+                statusText.textContent = 'Recording error: ' + event.error.name;
+            };
+            
+            // Start recording
+            mediaRecorder.start(1000); // Collect data in 1-second chunks
+            console.log('Recording started with MIME type:', mediaRecorder.mimeType);
+            
+            // Update UI
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            statusIndicator.classList.add('recording');
+            statusText.textContent = 'Recording in progress - Speak now';
+            transcriptEl.innerHTML = '<p class="placeholder">Recording... Speak into your microphone</p>';
+            responseEl.innerHTML = '<p class="placeholder">Waiting for response...</p>';
+            
+            // Start timer
+            startTimer();
+            
+        } catch (error) {
+            console.error("Error accessing microphone:", error);
+            alert("Could not access your microphone. Please check permissions.");
+            statusText.textContent = 'Microphone access denied';
+            responseEl.innerHTML = '<p class="error">Microphone access denied. Please allow microphone permissions.</p>';
+            
+            // Provide specific guidance based on error
+            if (error.name === 'NotAllowedError') {
+                responseEl.innerHTML += '<p>Please allow microphone access in your browser settings.</p>';
+            } else if (error.name === 'NotFoundError') {
+                responseEl.innerHTML += '<p>No microphone found. Please check your audio devices.</p>';
+            } else if (error.name === 'NotReadableError') {
+                responseEl.innerHTML += '<p>Microphone is already in use by another application.</p>';
+            }
+        }
     });
-  }
-
-  // Mic button event handler
-  micButton.addEventListener('click', async () => {
-    if (!isRecording) {
-      await startRecording();
-    } else {
-      stopRecording();
+    
+    // Stop recording
+    stopBtn.addEventListener('click', function() {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+            
+            // Update UI
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusIndicator.classList.remove('recording');
+            statusText.textContent = 'Processing...';
+            
+            // Stop timer
+            stopTimer();
+        }
+    });
+    
+    // Timer functions
+    function startTimer() {
+        seconds = 0;
+        timerInterval = setInterval(() => {
+            seconds++;
+            const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const secs = (seconds % 60).toString().padStart(2, '0');
+            timerEl.textContent = `${mins}:${secs}`;
+        }, 1000);
     }
-  });
-
-  // Test WebSocket functionality (Day 15)
-  window.testWebSocket = () => {
-    if (socket && socket.connected) {
-      socket.emit('test_message', { 
-        message: 'Hello from client!', 
-        timestamp: new Date().toISOString() 
-      });
-    } else {
-      console.error('Socket not connected');
+    
+    function stopTimer() {
+        clearInterval(timerInterval);
+        timerEl.textContent = '00:00';
     }
-  };
-
-  // Add welcome message
-  appendBot('Welcome to AI Voice Agent!', 'WebSocket enabled for real-time streaming');
-  
-  // Initialize in batch mode by default
-  statusEl.textContent = 'Ready. Toggle streaming mode or tap mic to begin.';
+    
+    // Add some CSS for error messages
+    const style = document.createElement('style');
+    style.textContent = `
+        .error {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .placeholder {
+            color: #7f8c8d;
+            font-style: italic;
+        }
+    `;
+    document.head.appendChild(style);
 });
