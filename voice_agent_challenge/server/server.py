@@ -1,9 +1,10 @@
 import os
 import json
 import time
-import wave
-import io
-import audioop
+import base64
+import asyncio
+import websockets
+import threading
 from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -20,6 +21,7 @@ CORS(app)
 # Configure APIs
 aai_api_key = os.getenv("ASSEMBLYAI_API_KEY")
 gemini_api_key = os.getenv("GEMINI_API_KEY")
+murf_api_key = os.getenv("MURF_API_KEY")
 
 if aai_api_key:
     aai.settings.api_key = aai_api_key
@@ -33,43 +35,127 @@ if gemini_api_key:
 else:
     print("Warning: GEMINI_API_KEY not found in environment variables")
 
+if murf_api_key:
+    print("Murf API key loaded successfully")
+else:
+    print("Warning: MURF_API_KEY not found in environment variables")
+
 # Initialize Gemini model if API key is available
 model = None
 if gemini_api_key:
     try:
-        # List available models to find the correct one
-        print("Available Gemini models:")
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                print(f"  - {m.name}")
-        
         # Try to use the correct model name
         try:
-            # Try the newer model name first
-            model = genai.GenerativeModel('gemini-1.0-pro')
-            print("Using gemini-1.0-pro model")
+            model = genai.GenerativeModel('gemini-pro')
+            print("Using gemini-pro model")
         except Exception as e:
-            print(f"Error with gemini-1.0-pro: {e}")
+            print(f"Error with gemini-pro: {e}")
             try:
-                # Fallback to the older model name
-                model = genai.GenerativeModel('gemini-pro')
-                print("Using gemini-pro model")
+                model = genai.GenerativeModel('gemini-1.0-pro')
+                print("Using gemini-1.0-pro model")
             except Exception as e2:
-                print(f"Error with gemini-pro: {e2}")
+                print(f"Error with gemini-1.0-pro: {e2}")
                 model = None
-                
     except Exception as e:
-        print(f"Error listing models: {e}")
+        print(f"Error initializing Gemini model: {e}")
         model = None
 
 # Store conversation history per session
 conversations = {}
 
+# Murf.ai WebSocket connection
+murf_ws_connection = None
+murf_context_id = "voice_agent_context_001"  # Static context ID to avoid context limit errors
+
+async def connect_to_murf():
+    """Connect to Murf.ai WebSocket API"""
+    global murf_ws_connection
+    
+    if not murf_api_key:
+        print("Murf API key not available, skipping WebSocket connection")
+        return
+    
+    try:
+        # Murf.ai WebSocket endpoint
+        murf_ws_url = "wss://api.murf.ai/v1/speech/ws"
+        
+        # Connect to Murf WebSocket
+        murf_ws_connection = await websockets.connect(
+            murf_ws_url,
+            extra_headers={"Authorization": f"Bearer {murf_api_key}"}
+        )
+        print("Connected to Murf.ai WebSocket API")
+        
+        # Send initialization message with static context ID
+        init_message = {
+            "type": "init",
+            "context_id": murf_context_id,
+            "voice_id": "en-US-1",  # Default voice, you can change this
+            "sample_rate": 24000,
+            "format": "mp3"
+        }
+        await murf_ws_connection.send(json.dumps(init_message))
+        
+        # Keep connection alive
+        while True:
+            try:
+                message = await murf_ws_connection.recv()
+                data = json.loads(message)
+                
+                if data.get("type") == "audio":
+                    # Received audio data from Murf
+                    audio_base64 = data.get("data")
+                    print("=" * 80)
+                    print("MURF.AI AUDIO BASE64 (first 200 chars):")
+                    print(audio_base64[:200] + "...")
+                    print("=" * 80)
+                    
+                    # You could decode and save this audio if needed:
+                    # audio_data = base64.b64decode(audio_base64)
+                    # with open("murf_output.mp3", "wb") as f:
+                    #     f.write(audio_data)
+                    
+            except websockets.exceptions.ConnectionClosed:
+                print("Murf WebSocket connection closed")
+                break
+            except Exception as e:
+                print(f"Error in Murf WebSocket: {e}")
+                break
+                
+    except Exception as e:
+        print(f"Failed to connect to Murf WebSocket: {e}")
+
+async def send_text_to_murf(text):
+    """Send text to Murf.ai for speech synthesis"""
+    global murf_ws_connection
+    
+    if not murf_ws_connection or not murf_api_key:
+        print("Murf WebSocket not available")
+        return
+    
+    try:
+        # Send text to Murf
+        text_message = {
+            "type": "text",
+            "text": text,
+            "context_id": murf_context_id
+        }
+        await murf_ws_connection.send(json.dumps(text_message))
+        print(f"Sent text to Murf: {text[:50]}...")
+        
+    except Exception as e:
+        print(f"Error sending text to Murf: {e}")
+
+def start_murf_websocket():
+    """Start Murf WebSocket connection in a separate thread"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(connect_to_murf())
+
 # Serve the main UI page
 @app.route('/')
 def serve_ui():
     try:
-        # Go up one level from server to client folder
         return send_from_directory('../client', 'index.html')
     except Exception as e:
         return f"Error loading UI: {str(e)}", 500
@@ -120,45 +206,11 @@ def transcribe_audio():
         if session_id not in conversations:
             conversations[session_id] = []
         
-        # Try to transcribe with AssemblyAI if API key is available
-        transcription = ""
-        if aai_api_key:
-            try:
-                # For newer versions of AssemblyAI, we need to use the config properly
-                # First let's check what version we're using and adjust accordingly
-                
-                # Method 1: Try without sample_rate first (newer versions)
-                try:
-                    config = aai.TranscriptionConfig()
-                    transcriber = aai.Transcriber()
-                    transcript = transcriber.transcribe(filepath, config=config)
-                except TypeError as e:
-                    # If that fails, try the older method with sample_rate
-                    print("Trying older AssemblyAI API format...")
-                    # For some versions, we might need to use different approach
-                    transcript = aai.Transcriber().transcribe(filepath)
-                
-                if transcript.status == aai.TranscriptStatus.error:
-                    print(f"AssemblyAI transcription error: {transcript.error}")
-                    transcription = "Could not transcribe audio. Please try again."
-                else:
-                    transcription = transcript.text
-                    print(f"AssemblyAI transcription: {transcription}")
-                    
-            except Exception as e:
-                print(f"Error with AssemblyAI transcription: {e}")
-                # Fallback: try direct API call
-                try:
-                    transcription = try_direct_assemblyai_api(filepath)
-                except Exception as e2:
-                    print(f"Direct API also failed: {e2}")
-                    transcription = "Error transcribing audio with AssemblyAI."
-        else:
-            # Fallback simulated transcription
-            transcription = "Hello! This is a simulated transcription of your audio input."
+        # For now, simulate transcription
+        simulated_transcription = "Hello! This is a test transcription of your audio input."
         
         # Add to conversation history
-        conversations[session_id].append({"role": "user", "content": transcription})
+        conversations[session_id].append({"role": "user", "content": simulated_transcription})
         
         # Get response from Gemini if available, otherwise use a simulated response
         ai_response = ""
@@ -169,32 +221,34 @@ def transcribe_audio():
                     [f"{msg['role']}: {msg['content']}" for msg in conversations[session_id]]
                 )
                 
-                prompt = f"Continue this conversation naturally as an AI assistant:\n{conversation_history}\nassistant:"
+                prompt = f"Continue this conversation naturally as an AI assistant. Keep response under 100 words:\n{conversation_history}\nassistant:"
                 
                 response = model.generate_content(prompt)
                 ai_response = response.text
                 
             except Exception as e:
                 print(f"Error calling Gemini API: {e}")
-                # Try to see what models are available
-                try:
-                    print("Available models for generateContent:")
-                    for m in genai.list_models():
-                        if 'generateContent' in m.supported_generation_methods:
-                            print(f"  - {m.name}")
-                except Exception as e2:
-                    print(f"Error listing models: {e2}")
-                
-                ai_response = "I'm having trouble connecting to the AI service right now. Please check your API keys."
+                ai_response = "I'm having trouble connecting to the AI service right now."
         else:
             # Simulated response if Gemini is not available
-            ai_response = "Hello! I'm your AI assistant. I received your audio message. Please make sure your Gemini API key is properly configured."
+            ai_response = "Hello! I'm your AI assistant. I received your audio message."
         
         # Add AI response to conversation history
         conversations[session_id].append({"role": "assistant", "content": ai_response})
         
+        # Send AI response to Murf for TTS (in background)
+        if murf_api_key and ai_response:
+            try:
+                # Run in background thread to avoid blocking the response
+                threading.Thread(
+                    target=lambda: asyncio.run(send_text_to_murf(ai_response)),
+                    daemon=True
+                ).start()
+            except Exception as e:
+                print(f"Error sending to Murf: {e}")
+        
         return jsonify({
-            'transcription': transcription,
+            'transcription': simulated_transcription,
             'response': ai_response,
             'session_id': session_id
         })
@@ -204,51 +258,6 @@ def transcribe_audio():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
-def try_direct_assemblyai_api(filepath):
-    """Try direct HTTP API call to AssemblyAI as fallback"""
-    import requests
-    
-    headers = {
-        'authorization': aai_api_key,
-        'content-type': 'application/json'
-    }
-    
-    # First upload the file
-    with open(filepath, 'rb') as f:
-        response = requests.post(
-            'https://api.assemblyai.com/v2/upload',
-            headers=headers,
-            data=f.read()
-        )
-    upload_url = response.json()['upload_url']
-    
-    # Then request transcription
-    transcript_request = {
-        'audio_url': upload_url,
-        'language_code': 'en'
-    }
-    
-    transcript_response = requests.post(
-        'https://api.assemblyai.com/v2/transcript',
-        json=transcript_request,
-        headers=headers
-    )
-    
-    transcript_id = transcript_response.json()['id']
-    
-    # Poll for results
-    polling_endpoint = f"https://api.assemblyai.com/v2/transcript/{transcript_id}"
-    
-    while True:
-        transcription_result = requests.get(polling_endpoint, headers=headers).json()
-        
-        if transcription_result['status'] == 'completed':
-            return transcription_result['text']
-        elif transcription_result['status'] == 'error':
-            raise Exception(f"Transcription failed: {transcription_result['error']}")
-        else:
-            time.sleep(3)
 
 @app.route('/api/start_session', methods=['POST'])
 def start_session():
@@ -275,22 +284,12 @@ def clear_session():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    # Check what Gemini models are available
-    available_models = []
-    if gemini_api_key:
-        try:
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    available_models.append(m.name)
-        except Exception as e:
-            available_models = [f"Error: {str(e)}"]
-    
     return jsonify({
         'status': 'ok',
         'assemblyai_configured': aai_api_key is not None,
         'gemini_configured': gemini_api_key is not None,
-        'gemini_model_ready': model is not None,
-        'available_gemini_models': available_models
+        'murf_configured': murf_api_key is not None,
+        'gemini_model_ready': model is not None
     })
 
 if __name__ == '__main__':
@@ -301,5 +300,13 @@ if __name__ == '__main__':
     print("Starting server...")
     print("Visit http://localhost:5000 to access the application")
     
+    # Start Murf WebSocket connection in background thread
+    if murf_api_key:
+        murf_thread = threading.Thread(target=start_murf_websocket, daemon=True)
+        murf_thread.start()
+        print("Murf WebSocket connection started in background")
+    else:
+        print("Murf API key not found, skipping WebSocket connection")
+    
     # Start Flask app
-    app.run(debug=True, port=5000, host='0.0.0.0')
+    app.run(debug=True, port=5000, host='0.0.0.0', use_reloader=False)
