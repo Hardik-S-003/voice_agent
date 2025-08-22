@@ -63,12 +63,60 @@ if gemini_api_key:
 # Store conversation history per session
 conversations = {}
 
-# Murf.ai WebSocket connection
+# WebSocket connections
 murf_ws_connection = None
-murf_context_id = "voice_agent_context_001"  # Static context ID to avoid context limit errors
+client_connections = set()  # Store all connected clients
+murf_context_id = "voice_agent_context_001"  # Static context ID
+
+async def handle_client_connection(websocket, path):
+    """Handle incoming client WebSocket connections"""
+    client_id = id(websocket)
+    client_connections.add(websocket)
+    print(f"Client connected: {client_id}")
+    
+    try:
+        await websocket.send(json.dumps({
+            "type": "status",
+            "message": "Connected to voice agent server"
+        }))
+        
+        # Keep connection alive
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                if data.get("type") == "audio_received":
+                    print(f"Client {client_id} acknowledged audio data reception")
+                    print(f"Audio chunk size: {len(data.get('chunk_id', 'unknown'))}")
+            except json.JSONDecodeError:
+                print(f"Invalid JSON from client {client_id}")
+                
+    except websockets.exceptions.ConnectionClosed:
+        print(f"Client {client_id} disconnected")
+    finally:
+        client_connections.discard(websocket)
+
+async def broadcast_to_clients(message):
+    """Send message to all connected clients"""
+    if not client_connections:
+        return
+        
+    disconnected_clients = set()
+    
+    for client in client_connections:
+        try:
+            await client.send(message)
+        except websockets.exceptions.ConnectionClosed:
+            disconnected_clients.add(client)
+        except Exception as e:
+            print(f"Error sending to client: {e}")
+            disconnected_clients.add(client)
+    
+    # Remove disconnected clients
+    for client in disconnected_clients:
+        client_connections.discard(client)
 
 async def connect_to_murf():
-    """Connect to Murf.ai WebSocket API"""
+    """Connect to Murf.ai WebSocket API and stream audio to clients"""
     global murf_ws_connection
     
     if not murf_api_key:
@@ -96,7 +144,8 @@ async def connect_to_murf():
         }
         await murf_ws_connection.send(json.dumps(init_message))
         
-        # Keep connection alive
+        # Keep connection alive and stream audio to clients
+        chunk_count = 0
         while True:
             try:
                 message = await murf_ws_connection.recv()
@@ -104,16 +153,25 @@ async def connect_to_murf():
                 
                 if data.get("type") == "audio":
                     # Received audio data from Murf
+                    chunk_count += 1
                     audio_base64 = data.get("data")
+                    
+                    # Print to console (first 100 chars for brevity)
                     print("=" * 80)
-                    print("MURF.AI AUDIO BASE64 (first 200 chars):")
-                    print(audio_base64[:200] + "...")
+                    print(f"MURF.AI AUDIO CHUNK {chunk_count} (first 100 chars):")
+                    print(audio_base64[:100] + "...")
                     print("=" * 80)
                     
-                    # You could decode and save this audio if needed:
-                    # audio_data = base64.b64decode(audio_base64)
-                    # with open("murf_output.mp3", "wb") as f:
-                    #     f.write(audio_data)
+                    # Send audio chunk to all connected clients
+                    audio_message = {
+                        "type": "audio_chunk",
+                        "chunk_id": f"chunk_{chunk_count}",
+                        "data": audio_base64,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                    await broadcast_to_clients(json.dumps(audio_message))
+                    print(f"Sent audio chunk {chunk_count} to {len(client_connections)} clients")
                     
             except websockets.exceptions.ConnectionClosed:
                 print("Murf WebSocket connection closed")
@@ -146,8 +204,18 @@ async def send_text_to_murf(text):
     except Exception as e:
         print(f"Error sending text to Murf: {e}")
 
+def start_client_websocket():
+    """Start client WebSocket server"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    start_server = websockets.serve(handle_client_connection, "0.0.0.0", 8765)
+    loop.run_until_complete(start_server)
+    print("Client WebSocket server started on port 8765")
+    loop.run_forever()
+
 def start_murf_websocket():
-    """Start Murf WebSocket connection in a separate thread"""
+    """Start Murf WebSocket connection"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(connect_to_murf())
@@ -289,7 +357,8 @@ def health_check():
         'assemblyai_configured': aai_api_key is not None,
         'gemini_configured': gemini_api_key is not None,
         'murf_configured': murf_api_key is not None,
-        'gemini_model_ready': model is not None
+        'gemini_model_ready': model is not None,
+        'connected_clients': len(client_connections)
     })
 
 if __name__ == '__main__':
@@ -300,6 +369,11 @@ if __name__ == '__main__':
     print("Starting server...")
     print("Visit http://localhost:5000 to access the application")
     
+    # Start client WebSocket server in background thread
+    client_ws_thread = threading.Thread(target=start_client_websocket, daemon=True)
+    client_ws_thread.start()
+    print("Client WebSocket server started on port 8765")
+    
     # Start Murf WebSocket connection in background thread
     if murf_api_key:
         murf_thread = threading.Thread(target=start_murf_websocket, daemon=True)
@@ -308,5 +382,5 @@ if __name__ == '__main__':
     else:
         print("Murf API key not found, skipping WebSocket connection")
     
-    # Start Flask app
-    app.run(debug=True, port=5000, host='0.0.0.0', use_reloader=False)
+    if __name__ == "__main__":
+        app.run(debug=True, port=5000, host='0.0.0.0', use_reloader=False)
