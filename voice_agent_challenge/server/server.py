@@ -151,6 +151,7 @@ async def connect_to_murf():
                 message = await murf_ws_connection.recv()
                 data = json.loads(message)
                 
+                # >>>>> THIS IS THE PART YOU NEED TO FIND AND UPDATE <<<<<
                 if data.get("type") == "audio":
                     # Received audio data from Murf
                     chunk_count += 1
@@ -173,6 +174,8 @@ async def connect_to_murf():
                     await broadcast_to_clients(json.dumps(audio_message))
                     print(f"Sent audio chunk {chunk_count} to {len(client_connections)} clients")
                     
+                # >>>>> END OF THE PART TO UPDATE <<<<<
+                
             except websockets.exceptions.ConnectionClosed:
                 print("Murf WebSocket connection closed")
                 break

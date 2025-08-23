@@ -10,7 +10,9 @@ document.addEventListener('DOMContentLoaded', function() {
     let socket;
     let sessionId = null;
     let audioStream;
-    let receivedAudioChunks = [];
+    let audioContext;
+    let audioQueue = [];
+    let isPlaying = false;
     
     // Initialize WebSocket connection
     function initWebSocket() {
@@ -36,12 +38,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         console.log(`Received audio chunk: ${data.chunk_id}`);
                         console.log(`Audio data length: ${data.data.length} characters`);
                         
-                        // Store the chunk
-                        receivedAudioChunks.push({
+                        // Add to audio queue for playback
+                        audioQueue.push({
                             id: data.chunk_id,
                             data: data.data,
                             timestamp: data.timestamp
                         });
+                        
+                        // Start playback if not already playing
+                        if (!isPlaying) {
+                            playAudioQueue();
+                        }
                         
                         // Send acknowledgement back to server
                         if (socket.readyState === WebSocket.OPEN) {
@@ -72,6 +79,73 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
+    // Play audio chunks from the queue
+    async function playAudioQueue() {
+        if (isPlaying || audioQueue.length === 0) return;
+        
+        isPlaying = true;
+        statusText.textContent = 'Playing audio...';
+        
+        while (audioQueue.length > 0) {
+            const audioChunk = audioQueue.shift();
+            
+            try {
+                await playAudioChunk(audioChunk.data);
+                console.log(`Played audio chunk: ${audioChunk.id}`);
+            } catch (error) {
+                console.error('Error playing audio chunk:', error);
+            }
+        }
+        
+        isPlaying = false;
+        statusText.textContent = 'Audio playback completed';
+    }
+    
+    // Play a single audio chunk
+    async function playAudioChunk(base64Audio) {
+        return new Promise((resolve, reject) => {
+            try {
+                // Convert base64 to ArrayBuffer
+                const binaryString = atob(base64Audio);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                // Create blob from ArrayBuffer
+                const blob = new Blob([bytes], { type: 'audio/mp3' });
+                const url = URL.createObjectURL(blob);
+                
+                // Create audio element
+                const audio = new Audio();
+                audio.src = url;
+                audio.preload = 'auto';
+                
+                // Set up event handlers
+                audio.onended = function() {
+                    URL.revokeObjectURL(url);
+                    resolve();
+                };
+                
+                audio.onerror = function(error) {
+                    URL.revokeObjectURL(url);
+                    reject(error);
+                };
+                
+                // Play the audio
+                audio.play().catch(error => {
+                    URL.revokeObjectURL(url);
+                    reject(error);
+                });
+                
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+    
     // Initialize session
     function initSession() {
         fetch('/api/start_session', {
@@ -99,7 +173,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Add message to chat
     function addMessage(sender, text, isError = false) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `msg ${sender}`;
@@ -117,8 +190,6 @@ document.addEventListener('DOMContentLoaded', function() {
         messageDiv.appendChild(avatar);
         messageDiv.appendChild(bubble);
         messagesContainer.appendChild(messageDiv);
-        
-        // Scroll to bottom
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
     
@@ -156,7 +227,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Add AI response
                 addMessage('bot', data.response);
                 
-                statusText.textContent = 'Response received - streaming audio...';
+                statusText.textContent = 'Response received - waiting for audio...';
                 
                 // Update session ID if returned
                 if (data.session_id) {
@@ -208,7 +279,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize session
     initSession();
     
-    
     // Start recording
     micButton.addEventListener('click', async function() {
         // Toggle recording state
@@ -219,7 +289,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 micButton.classList.remove('recording');
                 statusText.textContent = 'Processing...';
                 
-                // Stop all tracks
                 if (audioStream) {
                     audioStream.getTracks().forEach(track => track.stop());
                     audioStream = null;
@@ -230,13 +299,12 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 audioStream = await navigator.mediaDevices.getUserMedia({ 
                     audio: {
-                        channelCount: 1, // mono
+                        channelCount: 1, 
                         echoCancellation: true,
                         noiseSuppression: true
                     } 
                 });
                 
-                // Try to find a supported MIME type
                 let options = {};
                 if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
                     options.mimeType = 'audio/webm;codecs=opus';
@@ -256,7 +324,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
                 
                 mediaRecorder.onstop = () => {
-                    // Process and send the audio
+
                     processAndSendAudio();
                 };
                 
@@ -267,10 +335,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
                 
                 // Start recording
-                mediaRecorder.start(1000); // Collect data in 1-second chunks
+                mediaRecorder.start(1000); 
                 console.log('Recording started with MIME type:', mediaRecorder.mimeType);
-                
-                // Update UI
+
                 micButton.classList.add('recording');
                 statusText.textContent = 'Recording in progress - Speak now';
                 
@@ -278,8 +345,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.error("Error accessing microphone:", error);
                 statusText.textContent = 'Microphone access denied';
                 addMessage('bot', 'Could not access your microphone. Please check permissions.', true);
-                
-                // Provide specific guidance based on error
+
                 if (error.name === 'NotAllowedError') {
                     addMessage('bot', 'Please allow microphone access in your browser settings.', true);
                 } else if (error.name === 'NotFoundError') {
@@ -293,13 +359,14 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // New session button
     newSessionButton.addEventListener('click', function() {
-        // Clear conversation
+
         messagesContainer.innerHTML = '';
         
-        // Add welcome message
+        audioQueue = [];
+        isPlaying = false;
+        
         addMessage('bot', 'Hey! Tap the mic and speak — I\'ll respond and keep listening.');
         
-        // Start new session
         initSession();
     });
 });
