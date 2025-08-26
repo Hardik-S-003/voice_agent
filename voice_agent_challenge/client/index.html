@@ -253,6 +253,31 @@
         ::-webkit-scrollbar-thumb:hover {
             background: var(--primary-light);
         }
+        .context-display {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: var(--spacing-sm);
+            margin-bottom: var(--spacing-md);
+            display: flex;
+            justify-content: center;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .context-info {
+            display: flex;
+            gap: var(--spacing-md);
+        }
+
+        .context-info span {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+        }
+
+        .context-info i {
+            color: var(--primary);
+        }
     </style>
 </head>
 <body>
@@ -266,6 +291,7 @@
     </header>
 
     <div class="container">
+        <div id="context-display" class="context-display"></div>
         <div class="session-info-container">
             <div class="session-info" id="sessionInfo">
                 Session: <span id="shortSessionId">—</span>

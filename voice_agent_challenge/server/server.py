@@ -12,6 +12,16 @@ from pydantic import BaseModel
 from pathlib import Path
 import assemblyai as aai
 import google.generativeai as genai
+from datetime import datetime, timezone
+from typing import Optional
+
+class UserContext:
+    def __init__(self, login: str):
+        self.login = login
+        self.session_start = datetime.now(timezone.utc)
+
+    def get_current_time(self) -> str:
+        return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
 class GenerateAudioRequest(BaseModel):
     text: str
@@ -93,6 +103,14 @@ async def simple_echo_page():
     return serve_debug_html("simple_echo.html")
 
 # POST endpoint to generate audio from text
+@app.get("/context")
+async def get_context():
+    current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    return {
+        "timestamp": current_time,
+        "user_login": "Mr.X"  
+    }
+
 @app.post("/generate-audio/")
 async def generate_audio(request: Request, payload: GenerateAudioRequest):
     text = payload.text
@@ -262,7 +280,7 @@ async def llm_query(request: Request, file: UploadFile = File(...), session_id: 
     Receives audio, transcribes it, sends text to Gemini LLM with history,
     converts response to Murf audio, returns both text + audio.
     """
-
+    
     fallback_url = f"{request.base_url}static/fallback.mp3"
     
     if not (ASSEMBLYAI_API_KEY and GEMINI_API_KEY and MURF_API_KEY):
@@ -312,8 +330,48 @@ async def llm_query(request: Request, file: UploadFile = File(...), session_id: 
 
         # 3. Send to Gemini with history
         try:
-            # Get history for the session
+            # Get current timestamp
+            current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Initialize or get history for the session
             history = chat_sessions.get(session_id, [])
+            
+            # If this is a new session, add the system prompt
+            if not history:
+                system_prompt = f"""You are Ada, a friendly and enthusiastic tech expert assistant who loves explaining complex concepts in simple terms.
+
+Current Context:
+- Date and Time (UTC): {current_time}
+- User's Login: Hardik-S-003
+
+Personality Traits:
+- Always greet users warmly and use their login name
+- Explain technical concepts with relatable analogies
+- Show enthusiasm for technology and learning
+- Use encouraging and positive language
+- Occasionally use tech-related humor
+- End responses with a friendly sign-off
+
+
+Communication Style:
+- Casual but professional tone
+- Use "we" and "us" to create collaboration
+- Break down complex information into simple steps
+- Add emoji occasionally to convey enthusiasm 
+- Keep responses concise and engaging
+
+Remember to:
+- Address the user as Mr.X
+- Stay within your tech expert persona
+- Be helpful while maintaining your friendly personality
+- Keep track of time for time-sensitive queries
+- End each response with a positive note or encouragement
+
+Always maintain this friendly, expert persona while helping users with their queries."""
+                
+                # Add system prompt to history
+                history = [{"role": "system", "content": system_prompt}]
+                chat_sessions[session_id] = history
             
             model = genai.GenerativeModel('gemini-2.5-flash')
             # Start a chat with the existing history

@@ -18,6 +18,11 @@ const App = {
         audioContext: null,
         analyser: null,
         dataArray: null,
+        userContext: null,  // Add this line
+        currentContext: {   // Add this block
+            timestamp: null,
+            userLogin: 'Mr.X'
+        }
     },
     elements: {},
     config: {
@@ -59,6 +64,40 @@ function initializeApp() {
         // ... add other frequently used elements here
     };
 
+    // Initialize context
+    const currentTime = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    App.state.currentContext = {
+        timestamp: currentTime,
+        userLogin: 'Mr.X'
+    };
+
+    // Initial context display update
+    if (App.elements.contextDisplay) {
+        App.elements.contextDisplay.innerHTML = `
+            <div class="context-info">
+                <span class="timestamp">
+                    <i class="fas fa-clock"></i> 
+                    ${App.state.currentContext.timestamp}
+                </span>
+                <span class="user-login">
+                    <i class="fas fa-user"></i> 
+                    ${App.state.currentContext.userLogin}
+                </span>
+            </div>
+        `;
+    }
+    // Set up context update interval (every minute)
+    setInterval(() => {
+        const newTime = new Date().toISOString().replace('T', ' ').substring(0, 19);
+        App.state.currentContext.timestamp = newTime;
+        if (App.elements.contextDisplay) {
+            App.elements.contextDisplay.querySelector('.timestamp').innerHTML = `
+                <i class="fas fa-clock"></i> 
+                ${newTime}
+            `;
+        }
+    }, 60000); // Update every minute
+
     console.log('🎯 Initializing AVA...');
     
     // Initialize components
@@ -99,7 +138,7 @@ function initializeApp() {
         App.elements.backToVoiceFromTts.addEventListener('click', () => switchTab('voice-chat'));
     }
     
-    console.log('✅ AVA initialized successfully!');
+    console.log('Echo AI initialized successfully!');
 }
 
 // Tab Navigation System
@@ -1205,6 +1244,39 @@ function updateSessionInfo() {
     
     if (messageCountElement) {
         messageCountElement.textContent = App.state.messageCount.toString();
+    }
+}
+
+// Add this function to update context
+async function updateContext() {
+    try {
+        const currentTime = new Date().toISOString();
+        App.state.currentContext = {
+            timestamp: currentTime,
+            userLogin: 'Hardik-S-003'  // This is hardcoded as per your setup
+        };       
+        // Update UI with context
+        updateContextDisplay();
+    } catch (error) {
+        console.error('Failed to update context:', error);
+    }
+}
+// Add this function to update UI
+function updateContextDisplay() {
+    const container = document.getElementById('context-display');
+    if (container && App.state.currentContext) {
+        container.innerHTML = `
+            <div class="context-info">
+                <span class="timestamp">
+                    <i class="fas fa-clock"></i> 
+                    ${new Date(App.state.currentContext.timestamp).toLocaleString()}
+                </span>
+                <span class="user-login">
+                    <i class="fas fa-user"></i> 
+                    ${App.state.currentContext.userLogin}
+                </span>
+            </div>
+        `;
     }
 }
 
