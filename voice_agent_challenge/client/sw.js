@@ -1,4 +1,3 @@
-// sw.js - PWA service worker for AVA
 // Network-first for HTML and JS to prevent stale reloads, with safe precache of static assets
 
 const CACHE_NAME = 'ava-cache-v3';

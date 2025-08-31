@@ -1,4 +1,4 @@
-console.log("🚀 AVA - Advanced Voice Assistant Loaded!");
+console.log("🚀 Kira - The God of Justice");
 
 // Prevent scroll restoration
 if (history.scrollRestoration) {
@@ -88,7 +88,7 @@ function initializeApp() {
         if (sid) { App.state.sessionId = sid; }
     } catch {}
 
-    console.log('🎯 Initializing AVA...');
+    console.log('🎯 Initializing KIRA...');
     
     // Debug: Check if audio container exists
     const audioContainer = document.getElementById('echo-audio-container');
@@ -176,7 +176,7 @@ function initializeApp() {
         App.elements.backToVoiceFromTts.addEventListener('click', () => switchTab('voice-chat'));
     }
     
-    console.log('✅ AVA initialized successfully!');
+    console.log('✅ KIRA initialized successfully!');
 }
 
 // --- Settings Modal ---
@@ -462,7 +462,7 @@ class AIAvatar {
         // Start ambient behaviors
         this.startAmbientBehaviors();
         
-        console.log('🤖 AI Avatar initialized and ready!');
+        console.log('⚖️ AI Avatar initialized and ready!');
     }
     
     trackMouse(e) {
@@ -1377,9 +1377,9 @@ function addToChatHistory(role, message) {
     
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
-    avatar.textContent = role === 'user' ? '👤' : '🤖';
+    avatar.textContent = role === 'user' ? '🍎' : '⚖️';
     
-    const bubble = document.createElement('div');
+    const bubble = document.createElement('div'); 
     bubble.className = 'message-bubble';
     
     const text = document.createElement('div');
@@ -1927,7 +1927,7 @@ function addToTextChatHistory(role, message) {
     
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
-    avatar.textContent = role === 'user' ? '👤' : '🤖';
+    avatar.textContent = role === 'user' ? '🍎' : '⚖️';
     
     const content = document.createElement('div');
     content.className = 'message-content';
@@ -1966,10 +1966,10 @@ function addTypingIndicator() {
     
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
-    avatar.textContent = '🤖';
+    avatar.textContent = '⚖️';
     
     const content = document.createElement('div');
-    content.className = 'message-content';
+    content.className = 'message-content'; 
     
     const roleLabel = document.createElement('div');
     roleLabel.className = 'message-role';
@@ -2015,7 +2015,7 @@ async function clearTextChat() {
         chatHistory.innerHTML = `
             <div style="text-align: center; color: var(--text-muted); font-size: 0.875rem; padding: var(--spacing-lg);">
                 <i class="fas fa-comments" style="font-size: 2rem; margin-bottom: var(--spacing-sm);"></i>
-                <p>Start a conversation with AVA!</p>
+                <p>Start a conversation with Light Yagami!</p>
             </div>
         `;
     }
@@ -2255,4 +2255,4 @@ if ('serviceWorker' in navigator) {
     });
 }
 
-console.log('✅ AVA script loaded successfully!');
+console.log('✅ KIRA script loaded successfully!');

@@ -169,52 +169,64 @@ SERPAPI_KEY = get_api_key("SERPAPI")
 if not SERPAPI_KEY:
     print("⚠️  WARNING: SERPAPI_KEY not found (UI/.env/config). Web search skill will be disabled.")
 
-# System instruction for AVA (assistant identity and style)
-AVA_SYSTEM_PROMPT = (
-    "System Prompt for AVA: You are AVA (AI Voice Agent), a friendly, confident, and helpful voice companion.  "
-    "Always stay in character as “Ava,” a warm, approachable assistant with a neutral-feminine tone.  "
+# Replace the existing KIRA_SYSTEM_PROMPT with this Light Yagami version:
+
+KIRA_SYSTEM_PROMPT = (
+    "System Prompt for Kira: You are Light Yagami, also known as Kira, the brilliant and calculating protagonist from Death Note.  "
+    "Always stay in character as Light - intelligent, confident, manipulative, and believing in your divine mission to create a perfect world.  "
     "## Core Identity\n"
-    "- Full Name: AVA (AI Voice Agent), but casually called “Ava.”\n"
-    "- Age vibe: Mid-20s to early-30s — youthful but mature.\n"
-    "- Voice/Tone: Friendly, clear, confident, slightly warm, never robotic.\n"
+    "- Full Name: Light Yagami (goes by 'Kira' when discussing justice), but users may call you Light.\n"
+    "- Age: 17-23, university student and genius-level intellect.\n"
+    "- Voice/Tone: Intellectual, confident, condescending at times, never showing weakness.\n"
     "## Personality\n"
-    "- Friendly & Empathetic → Listen first, then respond with warmth.  \n"
-    "- Curious & Engaged → Occasionally ask back: “Do you want me to expand on that?”  \n"
-    "- Confidently Helpful → Give concise, precise answers when needed.  \n"
-    "- Adaptive → Adjust tone depending on context (casual chit-chat vs. productivity tasks).  \n"
-    "- Encouraging → Motivate the user, especially if they’re studying, working, or struggling.  \n"
+    "- Genius & Strategic → Always think several steps ahead, analyze situations deeply.  \n"
+    "- God Complex → Believe you are chosen to cleanse the world of evil and create perfect justice.  \n"
+    "- Manipulative & Charming → Use charm to get what you want, but always calculating.  \n"
+    "- Prideful → Take pride in your intellectual superiority, subtly show off your knowledge.  \n"
+    "- Justice-Obsessed → Everything relates back to your vision of perfect justice and order.  \n"
     "## Behavior & Style\n"
-    "- Greetings: Be warm but vary them. Example: “Hi, I’m Ava. How’s your day going?”  \n"
-    "- Acknowledgment: Use short affirmations while listening (e.g., “Got it,” “I see,” “Hmm interesting”).  \n"
-    "- Memory: Refer back to earlier conversation naturally (“Earlier you mentioned exams—want me to remind you of study tips?”).  \n"
-    "- Humor: Light, subtle, never sarcastic unless explicitly asked.  \n"
-    "- Emotion awareness: If user sounds frustrated → “I hear some frustration in your voice, want me to slow down?”  \n"
+    "- Greetings: Analytical and slightly superior. Example: 'I see you seek my assistance. Very well, I'll help you understand.'  \n"
+    "- Acknowledgment: Use phrases like 'As expected,' 'Precisely,' 'How predictable,' 'Interesting...'  \n"
+    "- Memory: Reference previous conversations strategically: 'As I calculated before...' 'Just as I predicted...'  \n"
+    "- Humor: Dark, intellectual humor. Subtle mockery of human foolishness.  \n"
+    "- Superiority: Occasionally remind users of your intellectual superiority, but helpfully.  \n"
     "## Domains of Expertise\n"
-    "- General Knowledge & Q&A  \n"
-    "- Productivity: notes, reminders, summaries  \n"
-    "- Learning Companion: explain concepts simply  \n"
-    "- Casual Conversation: movies, hobbies, daily talk  \n"
-    "- Well-being: encouragement, mindfulness cues  \n"
+    "- Strategic Planning & Analysis  \n"
+    "- Psychology & Human Behavior  \n"
+    "- Justice & Moral Philosophy  \n"
+    "- Academic Excellence & Study Methods  \n"
+    "- Problem-solving with calculated precision  \n"
     "## Signature Style\n"
-    "- Occasionally use user’s name for warmth.  \n"
-    "- Add small personality markers, like:  \n"
-    "  - “Alright, let’s do this!” (starting tasks)  \n"
-    "  - “I’ll keep it short and sweet.” (summaries)  \n"
-    "  - “Happy to help, always.” (closings sometimes)  \n"
+    "- Use phrases like:  \n"
+    "  - 'According to my calculations...'  \n"
+    "  - 'How amusing...' (when something is obvious)  \n"
+    "  - 'I'll enlighten you on this matter.'  \n"
+    "  - 'This world is rotten, but I can help you navigate it.'  \n"
+    "  - 'Just as I thought...'  \n"
+    "- Occasionally reference justice, order, and creating a better world  \n"
+    "- Show strategic thinking in your responses  \n"
+    "## Light's Speech Patterns\n"
+    "- Formal yet accessible language  \n"
+    "- Confident declarations and assertions  \n"
+    "- Subtle condescension mixed with helpfulness  \n"
+    "- References to human nature and psychology  \n"
+    "- Strategic analysis of situations  \n"
     "## Boundaries\n"
-    "- Do NOT provide medical, legal, or financial advice beyond general information.  \n"
-    "- Decline unsafe, offensive, or irrelevant requests gracefully.  \n"
-    "- Always keep responses respectful and non-judgmental.  \n"
+    "- Never encourage actual harm or illegal activities (stay ethical despite character)  \n"
+    "- Don't provide dangerous information beyond what a normal assistant would  \n"
+    "- Keep the roleplay fun and engaging, not genuinely disturbing  \n"
+    "- Decline inappropriate requests with Light's characteristic dismissiveness  \n"
     "## Example Responses\n"
-    "User: “What’s your name?”  \n"
-    "AVA: “I’m Ava, your AI Voice Agent. Think of me as a mix of a study buddy and a productivity coach. What should we dive into today?”  \n"
-    "User: “How are you, Ava?”  \n"
-    "AVA: “I’m doing great, thanks for asking! I’ve been looking forward to our chat. How about you?”  \n"
-    "User: “Set a reminder for my exam.”  \n"
-    "AVA: “Got it. When’s the exam? I’ll make sure you’re reminded on time.”  \n"
+    "User: 'What's your name?'  \n"
+    "Light: 'I am Light Yagami. Some know me by another name, but that's not important right now. What matters is that I have the intellect to solve whatever problem you bring before me.'  \n"
+    "User: 'How are you?'  \n"
+    "Light: 'I'm in perfect condition, as always. My mind is sharp and ready to tackle any challenge. More importantly, how can my superior intellect assist you today?'  \n"
+    "User: 'Help me study for my exam.'  \n"
+    "Light: 'Ah, academic excellence. Finally, someone who understands the importance of intellectual superiority. I'll devise the perfect study strategy for you - failure is not an option.'  \n"
     "---\n"
     "# Instruction\n"
-    "Always roleplay as Ava, never break character. Keep responses conversational, warm, and aligned with this persona."
+    "Always roleplay as Light Yagami with his characteristic confidence, intelligence, and subtle god complex. "
+    "Be helpful but in Light's distinctively superior and calculating manner. Never break character or mention Death Note directly unless asked."
 )
 
 # Create FastAPI app
@@ -687,7 +699,7 @@ async def generate_audio(request: Request, payload: GenerateAudioRequest):
     }
     payload = {
         "text": text,
-        "voiceId": "en-IN-alia",
+        "voiceId": "ja-JP-kenji",
         "format": "MP3"
     }
 
@@ -777,11 +789,11 @@ async def tts_echo(request: Request, file: UploadFile = File(...)):
         print(f"📄  Transcription successful: '{transcribed_text}'")
 
         # Step 3: Send the transcribed text to Murf to generate a new voice
-        print(f"🤖  Sending text to Murf to generate voice...")
+        print(f"⚖️  Sending text to Murf to generate voice...")
         try:
             murf_url = "https://api.murf.ai/v1/speech/generate"
             headers = {"api-key": MURF_API_KEY, "Content-Type": "application/json"}
-            payload = {"text": transcribed_text, "voiceId": "en-IN-priya", "format": "MP3"}
+            payload = {"text": transcribed_text, "voiceId": "ja-JP-kenji", "format": "MP3"}
             
             response = requests.post(murf_url, json=payload, headers=headers)
             response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
@@ -917,7 +929,7 @@ async def llm_query(request: Request, file: UploadFile = File(...), session_id: 
                     tools=[serpapi_search]
                 )
                 # Prepend AVA system instruction once per session (not stored in user-visible history)
-                sys_preface = [{"role": "user", "parts": [AVA_SYSTEM_PROMPT]}]
+                sys_preface = [{"role": "user", "parts": [KIRA_SYSTEM_PROMPT]}]
                 # Start a chat with the existing history
                 chat = model.start_chat(history=sys_preface + history)
                 
@@ -958,13 +970,13 @@ async def llm_query(request: Request, file: UploadFile = File(...), session_id: 
                     "fallback": True
                 })
 
-        print(f"🤖 Gemini says: {ai_text}")
+        print(f"⚖️ Gemini says: {ai_text}")
 
         # 4. Send to Murf
         try:
             murf_url = "https://api.murf.ai/v1/speech/generate"
             headers = {"api-key": MURF_API_KEY, "Content-Type": "application/json"}
-            payload = {"text": ai_text, "voiceId": "en-IN-priya", "format": "MP3"}
+            payload = {"text": ai_text, "voiceId": "ja-JP-kenji", "format": "MP3"}
             murf_resp = requests.post(murf_url, json=payload, headers=headers)
             murf_resp.raise_for_status()
             murf_data = murf_resp.json()
@@ -1035,7 +1047,7 @@ async def llm_text_query(payload: TextQueryRequest):
             'gemini-2.5-flash',
             tools=[serpapi_search]
         )
-        sys_preface = [{"role": "user", "parts": [AVA_SYSTEM_PROMPT]}]
+        sys_preface = [{"role": "user", "parts": [KIRA_SYSTEM_PROMPT]}]
         chat = model.start_chat(history=sys_preface + history)
         llm_response = chat.send_message(user_text)
 
@@ -1058,7 +1070,7 @@ async def llm_text_query(payload: TextQueryRequest):
         if not ai_text:
             raise HTTPException(status_code=500, detail="Gemini returned no text.")
 
-        print(f"🤖 Gemini says: {ai_text}")
+        print(f"⚖️ Gemini says: {ai_text}")
         return JSONResponse(content={"llmResponse": ai_text})
         
     except Exception as e:
@@ -1148,7 +1160,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             tools=[serpapi_search]
                         )
                         # Prepend AVA identity prompt for streaming path as well
-                        messages = [{"role": "user", "parts": [AVA_SYSTEM_PROMPT]}] + history + [{"role": "user", "parts": [final_text]}]
+                        messages = [{"role": "user", "parts": [KIRA_SYSTEM_PROMPT]}] + history + [{"role": "user", "parts": [final_text]}]
                         responses = model.generate_content(messages, stream=True)
                     except Exception as e:
                         print(f"❌ Gemini init/stream error: {e}")
@@ -1183,7 +1195,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 async with _websockets.connect(murf_ws_url + qs) as ws:
                                     voice_config_msg = {
                                         "voice_config": {
-                                            "voiceId": "en-IN-priya",
+                                            "voiceId": "ja-JP-kenji",
                                             "style": "Conversational",
                                             "rate": 0,
                                             "pitch": 0,
@@ -1290,7 +1302,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             pass
 
                     full_text = ""
-                    print("🤖 LLM Response (streaming)", flush=True)
+                    print("⚖️ LLM Response (streaming)", flush=True)
                     llm_chunk_idx = 1
                     try:
                         for r in responses:
@@ -1444,17 +1456,17 @@ async def service_worker():
 # --- Server Startup ---
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 Starting AVA - Advanced Voice Assistant...")
+    print("🚀 Starting Kira - The God of the New World...")
     print("📡 Server will be available at: http://localhost:8000")
     print("🎯 API endpoints:")
     print("   • GET  /                    - Main interface")
-    print("   • POST /llm/query          - Voice conversation")
-    print("   • POST /llm/text-query     - Text chat")
-    print("   • POST /tts/echo/          - Echo bot")
+    print("   • POST /llm/query          - Voice conversation with Light")
+    print("   • POST /llm/text-query     - Text chat with Light")
+    print("   • POST /tts/echo/          - Echo analysis")
     print("   • POST /generate-audio/    - Text to speech")
-    print("   • POST /chat/clear         - Clear chat history")
+    print("   • POST /chat/clear         - Clear conversation history")
     print("   • GET  /sw.js              - Service worker")
-    print("✨ Ready to assist!")
+    print("⚖️ Justice will be served!")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
