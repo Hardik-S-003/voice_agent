@@ -27,7 +27,6 @@ const App = {
         receivedAudioB64: [],
         previewIsPlaying: false,
         ttsQueuedUrl: null,
-        spotifyAudioEl: null, // reference to current Spotify preview audio element
     },
     elements: {},
     config: {
@@ -105,6 +104,7 @@ function initializeApp() {
     initializeVoiceChat();
     initializeEchoBot();
     initializeTextToSpeech();
+    initializeAIChat();
     initializeFloatingParticles();
     updateSessionInfo();
 
@@ -214,9 +214,7 @@ function bindSettingsModal() {
                 MURF_API_KEY: document.getElementById('key_murf')?.value || undefined,
                 ASSEMBLYAI_API_KEY: document.getElementById('key_assembly')?.value || undefined,
                 GEMINI_API_KEY: document.getElementById('key_gemini')?.value || undefined,
-                TAVILY_API_KEY: document.getElementById('key_tavily')?.value || undefined,
-                SPOTIFY_CLIENT_ID: document.getElementById('key_spotify_client')?.value || undefined,
-                SPOTIFY_CLIENT_SECRET: document.getElementById('key_spotify_secret')?.value || undefined,
+                SERPAPI_KEY: document.getElementById('key_serpapi')?.value || undefined,
                 WEATHER_API_KEY: document.getElementById('key_weather')?.value || undefined,
             };
             try {
@@ -315,10 +313,6 @@ function displayAudioPlayer(url) {
         if (App.state.ttsAudioContext && App.state.ttsAudioContext.state === 'running') {
             App.state.ttsAudioContext.suspend().catch(()=>{});
         }
-        // RULE: If Murf TTS is playing, then pause Spotify
-        if (App.state.spotifyAudioEl && !App.state.spotifyAudioEl.paused) {
-            try { App.state.spotifyAudioEl.pause(); } catch {}
-        }
     } catch {}
 
     // Hook play/pause/end events to manage TTS queueing
@@ -346,14 +340,6 @@ function stopPlayback() {
         // Stop the Murf HTML5 audio element if present
         const el = document.getElementById('ava-audio-player');
         if (el && !el.paused) { el.pause(); el.currentTime = 0; }
-    } catch {}
-
-    // Also stop Spotify preview if active
-    try {
-        if (App.state.spotifyAudioEl && !App.state.spotifyAudioEl.paused) {
-            App.state.spotifyAudioEl.pause();
-            App.state.spotifyAudioEl.currentTime = 0;
-        }
     } catch {}
 
     // Stop streaming TTS playback
@@ -898,74 +884,6 @@ async function startRecording(existingStream = null) {
                     } catch (e) {
                         console.error('❌ Failed to play fallback audio:', e);
                         try { showNotification('Failed to play fallback audio', 'error'); } catch {}
-                    }
-                } else if (msg && msg.type === 'spotify_results' && Array.isArray(msg.results)) {
-                    // Auto-play first available preview, else show clickable links via notification
-                    const firstWithPreview = msg.results.find(r => r.preview_url);
-                    if (firstWithPreview && firstWithPreview.preview_url) {
-                        try {
-                            // RULE: If Spotify is playing, then stop Murf TTS (stop any TTS-related playback/state)
-                            stopPlayback();
-                            
-                            // Create a dedicated HTML5 audio element for Spotify and manage it
-                            const container = document.getElementById('echo-audio-container')
-                                || document.getElementById('generated-audio-container')
-                                || document.getElementById('echo-player-container');
-                            if (container) {
-                                container.style.display = 'block';
-                                container.innerHTML = `
-                                    <audio id="spotify-preview-player" controls autoplay style="width: 100%; max-width: 420px; border-radius: 8px;">
-                                        <source src="${firstWithPreview.preview_url}" type="audio/mpeg">
-                                        Your browser does not support the audio element.
-                                    </audio>`;
-                                App.state.spotifyAudioEl = document.getElementById('spotify-preview-player');
-                            }
-                            const el = App.state.spotifyAudioEl;
-                            if (el) {
-                                // Force load then play (help with autoplay policies)
-                                el.load();
-                                const p = el.play();
-                                if (p && typeof p.then === 'function') {
-                                    p.catch(err => {
-                                        console.warn('Autoplay blocked, user gesture required.', err);
-                                        try { showNotification('Tap the play button to start the preview.', 'info'); } catch {}
-                                    });
-                                }
-                            }
-                            try { if (typeof animateAvatar === 'function') animateAvatar('speaking'); } catch {}
-                            try { showNotification(`Playing preview: ${firstWithPreview.name} — ${firstWithPreview.artists}`, 'success'); } catch {}
-                        } catch (e) {
-                            console.error('❌ Failed to play Spotify preview:', e);
-                            try { showNotification('Failed to start preview. Tap play on the audio player.', 'warning'); } catch {}
-                        }
-                    } else {
-                        // No preview URLs; show an inline link rather than auto-redirecting
-                        const first = msg.results[0];
-                        if (first && first.spotify_url) {
-                            try { showNotification(`No preview available. Open in Spotify: ${first.name} — ${first.artists}`, 'info'); } catch {}
-                            // Do NOT auto-open tab. Provide a visible link in the chat area.
-                            try {
-                                const container = document.getElementById('echo-audio-container')
-                                    || document.getElementById('generated-audio-container')
-                                    || document.getElementById('echo-player-container');
-                                if (container) {
-                                    container.style.display = 'block';
-                                    container.innerHTML = `
-                                        <div style="padding: 8px 0;">
-                                            <a href="${first.spotify_url}" target="_blank" rel="noopener" style="color:#4facfe;text-decoration:underline;">
-                                                Open in Spotify: ${first.name} — ${first.artists}
-                                            </a>
-                                        </div>`;
-                                }
-                                // If a TTS stream was in progress, keep it suspended while link is shown
-                                if (App.state.ttsAudioContext && App.state.ttsAudioContext.state === 'running') {
-                                    App.state.ttsAudioContext.suspend().catch(()=>{});
-                                }
-                                App.state.previewIsPlaying = false;
-                            } catch {}
-                        } else {
-                            try { showNotification('No Spotify preview or link available for the results.', 'error'); } catch {}
-                        }
                     }
                 } else if (msg && msg.type === 'audio_chunk') {
                     // Collect base64 audio chunks from server and play streamingly
@@ -2238,8 +2156,7 @@ function showNotification(message, type = 'info') {
         font-size: 0.875rem;
         font-weight: 500;
         z-index: 1000;
-        backdrop-filter: blur(20px);
-        animation: slideIn 0.3s ease;
+        backdrop-filter: none;
         max-width: 300px;
         box-shadow: var(--shadow-lg);
     `;
@@ -2261,39 +2178,16 @@ function showNotification(message, type = 'info') {
     
     // Auto remove after 3 seconds
     setTimeout(() => {
-        notification.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 300);
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+        }
     }, 3000);
 }
 
 // Add CSS for notifications
 const notificationStyles = document.createElement('style');
 notificationStyles.textContent = `
-    @keyframes slideIn {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
-    }
-    
-    @keyframes slideOut {
-        from {
-            transform: translateX(0);
-            opacity: 1;
-        }
-        to {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-    }
+    /* Notification styles - no animations */
 `;
 document.head.appendChild(notificationStyles);
 
