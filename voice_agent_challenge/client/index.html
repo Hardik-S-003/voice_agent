@@ -532,12 +532,12 @@
         }
 
         .chat-message.user .message-avatar {
-            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            background: linear-gradient(135deg, #2d2d2d2d);
             order: 2;
         }
 
         .chat-message.assistant .message-avatar {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            background: linear-gradient(135deg, #ffffff);
             order: 1;
         }
 
@@ -558,14 +558,14 @@
         }
 
         .chat-message.user .message-bubble {
-            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-            color: #111111; /* Dark text for better contrast on warm gradient */
+            background: #808080 !important; 
+            color: #ffffff !important;
             border-bottom-right-radius: 4px;
         }
 
         .chat-message.assistant .message-bubble {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-            color: #111111; /* Match user bubble text for readability */
+            background: #808080 !important; /* Black background */
+            color: #ffffff !important; /* White text */
             border-bottom-left-radius: 4px;
         }
 
@@ -600,7 +600,7 @@
         .chat-message.user .message-meta,
         .chat-message.assistant .message-time,
         .chat-message.assistant .message-meta {
-            color: rgba(0, 0, 0, 0.65);
+            color: rgba(255, 255, 255, 0.8);
         }
 
         .message-icon {
@@ -981,10 +981,70 @@
         }
         /* Prevent grid overflow from 2-column span on single-column layout */
         #encryptionHint { grid-column: 1 / -1 !important; }
-      }
+        }
+        .branding-header {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1500;
+            background: rgba(139, 92, 246, 0.2);
+            backdrop-filter: blur(10px);
+            border: 2px solid var(--accent-purple);
+            border-radius: 25px;
+            padding: 8px 16px;
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+            animation: pulse-glow 2s ease-in-out infinite alternate;
+        }
+
+        .powered-by {
+            font-size: 14px;
+            color: var(--text-primary);
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+        }
+
+        .murf-brand {
+            color: var(--accent-bright);
+            font-weight: 700;
+            text-decoration: none;
+            text-shadow: 0 0 15px rgba(192, 132, 252, 0.8);
+        }
+
+        .powered-by:hover {
+            transform: scale(1.05);
+            transition: transform 0.2s ease;
+        }
+
+        @keyframes pulse-glow {
+            0% {
+                box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+                border-color: var(--accent-purple);
+            }
+            100% {
+                box-shadow: 0 0 30px rgba(192, 132, 252, 0.6);
+                border-color: var(--accent-bright);
+            }
+        }
+
+        /* Ensure it's visible on mobile */
+        @media (max-width: 768px) {
+            .branding-header {
+                top: 15px;
+                right: 15px;
+                padding: 6px 12px;
+            }
+            .powered-by {
+                font-size: 12px;
+            }
+        }
     </style>
 </head>
 <body>
+    <div class="branding-header">
+        <p class="powered-by">Powered by <span class="murf-brand">Murf</span></p>
+    </div>
     <!-- Animated Background -->
     <div class="bg-animation"></div>
     
