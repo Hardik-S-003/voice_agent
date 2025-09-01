@@ -1,4 +1,4 @@
-# Voice Agent Challenge
+# Voice Agent Challenge (KIRA)
 
 A minimalist AI voice assistant with intelligent search capabilities, real-time voice interaction, and modern dark purple neon UI design.
 
@@ -9,17 +9,15 @@ A minimalist AI voice assistant with intelligent search capabilities, real-time 
 - **Text Chat Interface**: Type messages when voice input isn't preferred
 - **Session Management**: Persistent conversation history with SQLite
 - **Progressive Web App**: Full PWA support with offline capabilities
-- **Dark Purple Neon Theme**: Clean, minimalistic modern design
 - **Advanced Audio Processing**: High-quality voice recognition and synthesis
 
 ## 🛠️ Tech Stack
 
 **Frontend:**
-- HTML5 with semantic structure
+- HTML5 
 - Vanilla JavaScript (ES6+) 
 - CSS3 with custom properties and animations
 - Web Audio API for voice processing
-- Service Worker for PWA features
 
 **Backend:**
 - Python 3.12+ with FastAPI framework
@@ -144,7 +142,6 @@ voice_agent_challenge/
 - **Clean Architecture**: Separation of client and server code
 - **Modern Web Standards**: ES6+, CSS Grid, Flexbox
 - **Real-time Communication**: WebSocket support
-- **PWA Ready**: Offline functionality and installable
 - **Production Ready**: Error handling and fallbacks
 
 ## 🙏 Acknowledgments
@@ -156,5 +153,3 @@ voice_agent_challenge/
 - **FastAPI** for the robust and fast backend framework
 
 ---
-
-*Built with ❤️ for seamless AI voice interaction*
